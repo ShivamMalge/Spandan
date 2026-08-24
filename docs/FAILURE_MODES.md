@@ -72,37 +72,80 @@ through (10/day, an assumption stated in `costs.toml [operations]`).
 
 | | unconstrained | constrained (≤10 alerts/day) |
 |---|---|---|
-| threshold | 21.15 | **23.05** |
-| alerts/day | 27.6 | **6.2** |
-| precision | 0.4003 | **0.4867** |
-| precision @ 0.15% | 0.0693 | **0.0956** |
-| recall | 0.8696 | 0.7884 |
+| threshold | 21.43 | **21.99** |
+| alerts/day | 18.3 | **9.7** |
+| precision | 0.418 | **0.446** |
+| precision @ 0.15% | 0.0740 | **0.0824** |
+| recall | 0.862 | 0.844 |
 | episodes caught | 60/60 | 60/60 |
-| median TTD | 0 events | 2 events |
-| break-even review cost | ₹204 | **₹985** |
+| flag rate | 0.0274 | **0.0252** |
 
-The frontier, printed by `make eval` as a sensitivity table:
+Figures are from the 600-point grid. An earlier 60-point grid reported a larger
+improvement (precision 0.400 → 0.487) because its coarse sampling happened to
+place the constrained pick at a favourable threshold; the refined grid finds a
+higher-validation-net point inside the same budget, and it generalises worse. The
+coarse figures were luck and are superseded.
 
-| alerts/day budget | threshold | alerts/day | precision | prec @ 0.15% | recall | episodes | median TTD | net |
-|---|---|---|---|---|---|---|---|---|
-| 2 | 28.77 | 2.0 | 0.718 | 0.2214 | 0.597 | 35/60 | 7 | ₹308,616 |
-| 5 | 24.96 | 3.5 | 0.569 | 0.1281 | 0.706 | 51/60 | 5 | ₹324,386 |
-| **10** | **23.05** | **6.2** | **0.487** | **0.0956** | **0.788** | **60/60** | **2** | **₹294,844** |
-| 20 | 23.05 | 6.2 | 0.487 | 0.0956 | 0.788 | 60/60 | 2 | ₹294,844 |
-| 50 | 21.15 | 27.6 | 0.400 | 0.0693 | 0.870 | 60/60 | 0 | ₹226,409 |
+The frontier, printed by `make eval` as a sensitivity table (600-point threshold
+grid; the first version used 60 and left the whole 6–28 alerts/day band unsampled):
 
-Two things this table says that a single operating point could not:
+| budget | thresh | alerts/d | ev/alert | flag rate | prec | prec @ 0.15% | recall | episodes | med TTD | val net | test net |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 2 | 27.99 | 2.1 | 90 | 0.0120 | 0.696 | **0.2034** | 0.627 | 35/60 | 6 | ₹82,806 | ₹324,539 |
+| 5 | 23.86 | 4.7 | 66 | 0.0191 | 0.519 | 0.1073 | 0.745 | 58/60 | 5 | ₹100,588 | ₹322,004 |
+| 8 | 22.36 | 8.3 | 46 | 0.0238 | 0.462 | 0.0875 | 0.828 | 60/60 | 1 | ₹114,196 | ₹284,112 |
+| **10** | **21.99** | **9.7** | **42** | **0.0252** | **0.446** | **0.0824** | **0.844** | **60/60** | **0** | **₹119,267** | **₹279,151** |
+| 12 | 21.80 | 11.6 | 36 | 0.0259 | 0.437 | 0.0797 | 0.850 | 60/60 | 0 | ₹117,924 | ₹272,040 |
+| 15 | 21.61 | 14.2 | 30 | 0.0266 | 0.428 | 0.0769 | 0.856 | 60/60 | 0 | ₹117,030 | ₹267,910 |
+| 20 | 21.43 | 18.3 | 24 | 0.0274 | 0.418 | 0.0740 | 0.862 | 60/60 | 0 | ₹114,877 | ₹254,638 |
+| 30 | 21.43 | 18.3 | 24 | 0.0274 | 0.418 | 0.0740 | 0.862 | 60/60 | 0 | ₹114,877 | ₹254,638 |
+| 50 | 21.43 | 18.3 | 24 | 0.0274 | 0.418 | 0.0740 | 0.862 | 60/60 | 0 | ₹114,877 | ₹254,638 |
 
-- **Net rupees is nearly flat across the whole range** (₹226k–₹324k) while
-  precision at a realistic base rate varies by 3×. The cost model genuinely
-  cannot see the difference that matters most, which is the §6 limitation
-  showing up in the place it does the most damage.
-- **The budget is not a free win.** Tightening from 10 to 2 triples precision and
-  costs 25 of 60 episodes.
+Three things this table says, and the second is a finding about the constraint
+rather than about the detector.
 
-This is a **sensitivity analysis, not a menu.** The headline budget was fixed in
-`costs.toml` before the test window was read. Picking a row from this table after
-seeing these numbers would be selecting on the test set.
+**Net is not monotone in the budget on test, and that is not a bug.** A larger
+budget permits every threshold a smaller one permits, so the constrained maximum
+cannot fall — and on the **validation** window, where selection happens, it does
+not: ₹82,806 → ₹100,588 → ₹114,196 → ₹119,267, rising monotonically. The `test
+net` column is measured at a threshold chosen on validation, so the two need not
+agree. Where test net falls as the budget loosens, that is the
+validation-to-test generalisation gap. It is worth reading as evidence: **the
+operating point that looked best on validation transferred worst.**
+
+**An alert budget does not constrain event-level over-triggering.** `ev/alert` is
+how many flagged events each alert collapses. Alerts are deduplicated per
+(merchant, BIN) with a 15-minute cooldown, so at the headline budget **20,254
+flagged events — 2.5% of all traffic — collapse into 487 alerts.** The flood hides
+inside the dedup. This is why `med TTD` returns to 0 at every budget of 10 or
+looser: episodes are caught on their first event because nearly everything is
+being flagged. The alert budget was chosen as the constraint because a merchant
+can state it from their own staffing; that reasoning stands, but on this evidence
+it is a **weak proxy for how noisy the detector actually is**, and `flag rate`
+belongs beside it. A second constraint on event-level flag rate is the obvious
+follow-up and is listed in §7.
+
+**Net rupees varies 1.3× across the whole frontier (₹254k–₹324k) while precision
+at a realistic base rate varies 2.7× (0.074–0.203).** The cost model cannot see
+the difference that matters most. This is the §6 limitation appearing in the place
+it does the most damage, and it is the single sharpest finding in this document.
+
+> **PITCH-VIDEO CANDIDATE.** "The cost model is nearly indifferent across the
+> entire operating range, while the number a merchant would actually live with
+> moves by a factor of three. A rupee figure that cannot distinguish the good
+> operating point from the bad one is not a decision procedure — which is why the
+> threshold is now chosen under a constraint the merchant states, not by
+> maximising the model."
+
+**A note on why the headline row is not the best row.** Budgets 2 and 5 are better
+on test net *and* on precision. The headline stays at 10 because that budget was
+registered in `costs.toml` before the test window was read, and its basis — what
+one analyst can work through — does not depend on these results. Moving it now
+would be selecting on the test set, which is the thing this table's caption warns
+against. Re-registering the budget is a legitimate Phase 6 decision **provided it
+is argued from the operational basis and not from this column.**
+
+This is a **sensitivity analysis, not a menu.**
 
 ---
 
@@ -425,7 +468,13 @@ Ordered by how much they change the credibility of the submission:
    and re-validate it without putting the port at risk.
 2. **Model alert fatigue, or stop reporting net rupees as the deciding metric**
    (§3.1). Linear review cost is why the cost model cannot separate the variants.
-3. **Reduce variance before running ablations again** — common random numbers
+3. **Add an event-level flag-rate constraint** alongside the alerts/day budget.
+   The alert budget alone does not constrain over-triggering, because dedup
+   collapses 42 flagged events into each alert (§0.1). A cap on the fraction of
+   traffic flagged would bind where the alert budget does not, and it is a change
+   to the selection rule rather than to the detector — so it is available even
+   under the freeze.
+4. **Reduce variance before running ablations again** — common random numbers
    across variants, or more seeds. §3 is currently a null result for measurement
    reasons, not architectural ones.
-4. **Persist baselines across restarts** to remove the cold-start failure (§2.3).
+5. **Persist baselines across restarts** to remove the cold-start failure (§2.3).

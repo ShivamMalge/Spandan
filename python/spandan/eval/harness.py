@@ -108,9 +108,15 @@ def sweep_thresholds(
     events: list[Event],
     scores: np.ndarray,
     model: CostModel,
-    count: int = 60,
+    count: int = 600,
 ) -> list[dict]:
     """Net rupee position across the full threshold range.
+
+    600 points, not 60. Alerts/day is extremely steep in the threshold near the
+    operating region - at 60 points the whole band between 6 and 28 alerts/day was
+    unsampled, so the frontier could not distinguish budgets of 10 and 20 and the
+    most interesting part of the trade-off was invisible. The sweep is vectorised
+    and costs ~0.4s per 60 points, so resolution here is nearly free.
 
     This is what replaced the calibration curve. The score is a deviation from a
     per-entity baseline rather than a probability, so calibration would answer a
@@ -315,10 +321,18 @@ def run_budget_frontier(
         medians = [
             row["median_events"] for row in ttd.values() if not math.isinf(row["median_events"])
         ]
+        flagged_mask = test_scores > threshold
         rows.append(
             {
                 "budget": budget,
                 "threshold": threshold,
+                "flag_rate": float(flagged_mask.mean()),
+                "flagged_events": int(flagged_mask.sum()),
+                "events_per_alert": (
+                    int(flagged_mask.sum()) / len(alert_list) if alert_list else 0.0
+                ),
+                "validation_net_rupees": chosen["net_paise"] / 100.0,
+                "validation_alerts_per_day": chosen["alerts_per_day"],
                 "alerts_per_day": metrics.alerts_per_day(split.test, alert_list),
                 "precision": confusion.precision,
                 "precision_at_target": reweighted.precision_target,
@@ -343,23 +357,45 @@ def render_frontier(rows: list[dict], model: CostModel) -> None:
     print("the operating point using a cost model that prices a wrongly-blocked declining")
     print("transaction at almost nothing - so it bought recall with false positives.")
     print()
-    print(f"{'budget':>8}{'thresh':>9}{'alerts/d':>10}{'prec':>8}{'prec@0.15%':>12}"
-          f"{'recall':>8}{'episodes':>10}{'med TTD':>9}{'net':>12}")
+    print(f"{'budget':>8}{'thresh':>9}{'alerts/d':>10}{'ev/alert':>10}{'flag rate':>11}"
+          f"{'prec':>8}{'prec@0.15%':>12}{'recall':>8}{'episodes':>10}{'med TTD':>9}"
+          f"{'val net':>12}{'test net':>12}")
     for row in rows:
         marker = " <== HEADLINE" if row["budget"] == model.alerts_per_day_budget else ""
         ttd = row["median_ttd_events"]
         caught_cell = f"{row['episodes_caught']}/{row['episodes']}"
         print(
             f"{row['budget']:>8.0f}{row['threshold']:>9.2f}{row['alerts_per_day']:>10.1f}"
+            f"{row['events_per_alert']:>10.0f}{row['flag_rate']:>11.4f}"
             f"{row['precision']:>8.3f}{row['precision_at_target']:>12.4f}"
             f"{row['recall']:>8.3f}"
             f"{caught_cell:>10}"
             f"{('never' if math.isinf(ttd) else f'{ttd:.0f}'):>9}"
+            f"{R + format(row['validation_net_rupees'], ',.0f'):>12}"
             f"{R + format(row['net_rupees'], ',.0f'):>12}{marker}"
         )
     print()
     print("`prec@0.15%` is precision reweighted to a realistic merchant card-testing")
     print("base rate. It is the number an operations team would actually live with.")
+    print()
+    print("AN ALERT BUDGET DOES NOT CONSTRAIN EVENT-LEVEL OVER-TRIGGERING.")
+    print("`ev/alert` is how many flagged events each alert collapses. Alerts are")
+    print("deduplicated per (merchant, BIN) with a 15-minute cooldown, so a threshold low")
+    print("enough to flag 2.5% of ALL traffic still produces only ~10 alerts a day - the")
+    print("flood hides inside the dedup. That is why `med TTD` returns to 0 at the looser")
+    print("budgets: episodes are caught on their first event because almost everything is")
+    print("being flagged. Read `flag rate` and `ev/alert` alongside the budget; the budget")
+    print("alone is a weak proxy for how noisy the detector actually is.")
+    print()
+    print("WHY `net` IS NOT MONOTONE IN THE BUDGET. A larger budget permits every")
+    print("threshold a smaller one permits, so the constrained maximum cannot fall -")
+    print("and on the VALIDATION window, where selection happens, it does not: net rises")
+    print("monotonically with the budget. `net` here is measured on TEST, at a threshold")
+    print("chosen on validation, so the two need not agree. Where the test column dips")
+    print("as the budget loosens, that is the validation-to-test generalisation gap,")
+    print("not a selection bug. It is worth reading as evidence in its own right: the")
+    print("operating point that looked best on validation did not transfer best.")
+    print()
     print("This table is a SENSITIVITY analysis. The headline budget was fixed in")
     print("costs.toml before the test window was read; choosing a row from here after")
     print("seeing these numbers would be selecting on the test set.")

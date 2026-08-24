@@ -71,8 +71,11 @@ This is a knob on purpose. A larger team should raise it and re-read the frontie
 the harness prints; the frontier is reported precisely so this number can be
 argued with rather than accepted."""
 
-frontier_budgets = [2, 5, 10, 20, 50]
-frontier_basis = """Budgets swept for the sensitivity table. The HEADLINE uses
+frontier_budgets = [2, 5, 8, 10, 12, 15, 20, 30, 50]
+frontier_basis = """Budgets swept for the sensitivity table. Refined in the
+8-30 band after the first frontier showed budgets 10 and 20 producing identical
+rows - alerts/day jumped 6.2 -> 27.6 with nothing between, leaving the most
+interesting part of the trade-off unsampled. The HEADLINE uses
 `alerts_per_day_budget` only. The rest of the frontier is reported so the
 trade-off is visible - it is NOT a menu to pick the flattering row from after
 seeing test results."""

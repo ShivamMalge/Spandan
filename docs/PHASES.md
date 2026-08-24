@@ -6,10 +6,14 @@ criterion below is a command whose output goes in the review, not a claim.
 **Approved Aug 24 with six edits; edits applied, provenance recorded at the foot of
 this file.**
 
-**Availability: closed.** No weekday/weekend asymmetry, capacity is not the binding
-constraint on this build (answered Aug 24). Phase 3 stays on Fri 28 – Sun 30 Aug.
-Full reasoning near the foot of this file; recorded here because it was asked
-three times and the answer was buried.
+**Availability: closed, and deliberately not maximal.** Plan on roughly **6–8
+focused hours a day with normal sleep**, seven days a week with no weekday/weekend
+asymmetry. An earlier answer of "24 hours a day" was recorded and is **corrected
+here: that is not a schedule and no estimate is calibrated on it.** There are
+three days of buffer, the detector is frozen, and what remains is a port and a
+write-up rather than a rescue. Rested parity debugging is faster than unrested
+parity debugging, and Phase 3's one-day hard stop is a decision that needs
+judgement rather than hours. Phase 3 stays on Fri 28 – Sun 30 Aug.
 
 **Detector freeze: in force from the Phase 2 gate through Phase 3.** No changes to
 `detect/reference.py`, to the feature set, or to window sizes. Phase 3 tests the
@@ -545,13 +549,14 @@ available; the fresh-clone reproduction is the hard stop.
 
 Phase 3's three days land Fri/Sat/Sun. Availability is flat across the week
 (confirmed Aug 24), so this is no longer a capacity assumption — it is simply the
-longest phase sitting on three consecutive days.
+longest phase sitting on three consecutive days. It is not three days of maximum
+hours; see the availability note at the top of this file.
 
-The schedule assumes roughly six focused hours a day. Availability is not the
-limit here, but planning at that rate is deliberate: a schedule that only closes at
+The schedule assumes roughly six focused hours a day, at the lower end of the
+stated 6-8 hour range, and that is deliberate: a schedule that only closes at
 twelve-hour days has no slack in it, and the review cycle between gates is real
-elapsed time regardless. ~1.0 day of slack over 11 days is thin, so the cut list is
-the rest of the slack.
+elapsed time regardless of who is awake. ~1.0 day of slack over 11 days is thin,
+so the cut list is the rest of the slack.
 
 ---
 
@@ -719,10 +724,13 @@ swallowed.
 constraint on this build. Consequences:
 
 - Phase 3 stays on Fri 28 – Sun 30 Aug. No reshuffle needed.
-- The schedule keeps its ~6 focused hours/day planning basis. Surplus capacity is
-  treated as **real slack, not as schedulable hours** — planning against long days
-  is how estimates fail, and a plan that only works at 14 hours a day has no slack
-  at all.
+- The schedule keeps its ~6 focused hours/day planning basis, which is **inside**
+  the stated 6–8 hour range. No phase estimate was ever calibrated on the
+  "24 hours" answer, so correcting it changes no number in this plan — checked
+  phase by phase on Aug 24.
+- Surplus capacity is **real slack, not schedulable hours**. Planning against long
+  days is how estimates fail, and a plan that only closes at fourteen-hour days
+  has no slack in it at all.
 - The binding constraint is therefore the calendar and the review cycle, not hours
   available. That makes the cut list, not the clock, the thing to watch.
 

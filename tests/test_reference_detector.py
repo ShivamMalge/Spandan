@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import dataclasses
 import random
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -310,3 +311,41 @@ def test_the_scoring_terms_are_frozen():
         "repetition",
         "merchant_span",
     }, f"the scoring terms changed: {sorted(terms)}"
+
+
+def test_parity_fixture_is_current():
+    """The committed fixture must match what the frozen reference produces now.
+
+    This is the freeze's teeth. If someone changes `reference.py` during Phase 3,
+    the Rust core would be ported against a spec that no longer matches the
+    Python, and the parity test would compare the port to a stale artifact while
+    still passing. This test fails first.
+    """
+    from spandan.detect import parity
+
+    fixture_path = Path(__file__).resolve().parent / "fixtures" / "parity.json"
+    assert fixture_path.exists(), "tests/fixtures/parity.json is missing; it must be committed"
+
+    on_disk = fixture_path.read_text(encoding="utf-8")
+    regenerated = parity.serialise(parity.build_fixture())
+    assert on_disk == regenerated, (
+        "the parity fixture is stale - the reference detector changed after it was "
+        "written. Either revert the detector (it is FROZEN through Phase 3) or "
+        "regenerate with `python -m spandan.detect.parity` and re-approve."
+    )
+
+
+def test_parity_fixture_carries_no_labels():
+    """The Rust core never sees labels, so its contract must not contain them."""
+    import json
+
+    fixture_path = Path(__file__).resolve().parent / "fixtures" / "parity.json"
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+
+    from spandan.gen.schema import FEATURE_COLUMNS, LABEL_COLUMNS
+
+    assert fixture["feature_columns"] == list(FEATURE_COLUMNS)
+    for banned in LABEL_COLUMNS:
+        assert banned not in fixture["feature_columns"]
+    assert len(fixture["events"]) == len(fixture["expected_scores"])
+    assert all(len(row) == len(FEATURE_COLUMNS) for row in fixture["events"])
