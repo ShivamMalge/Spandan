@@ -259,12 +259,18 @@ legitimate Phase 2 outcome and a strong failure-modes section. The gate is that 
 number is measured and reported, not that it is good. One round of window-size/
 threshold iteration is budgeted, on the validation window only.
 
-One correction to the approval note: dropping the calibration curve does **not**
-free time for Phase 3. The cost-vs-threshold sweep replaces it at roughly equal
-cost, and additions 5 and 6 (multi-seed, time-to-detection) are new work — call it
-a quarter-day net increase, which is why Phase 2 moved from 2.0 to 2.25 and the
-project total from 9.5 to 9.75. Phase 3's parity risk is covered by the
-pre-committed one-day hard stop below, not by borrowed hours.
+**Accounting, settled Aug 24:** dropping the calibration curve frees nothing. The
+cost-vs-threshold sweep replaces it at roughly equal cost and additions 5 and 6
+(multi-seed, time-to-detection) are net new work — a quarter-day increase, which is
+why Phase 2 is 2.25 days and the project total is 9.75 across 11. Phase 3's parity
+risk is therefore covered by the pre-committed one-day hard stop and by nothing
+else.
+
+> **Escalation, not silent absorption.** If Phase 2 has not gated by end of
+> **Aug 27**, flag it that day and cut ablations to two immediately (cut-list item
+> 2, pulled forward from the Aug 31 decision point). Do not absorb a Phase 2
+> overrun into Sep 1 — Sep 1 is a single slack day and a Phase 2 overrun plus a
+> Phase 3 overrun would both land on it.
 
 ---
 
@@ -327,6 +333,10 @@ between two implementations.
 > output, a `BUILD_LOG.md` entry names the discrepancy and what was tried, and the
 > phase moves on. **No exactness chase. No second day on parity.** This is decided
 > now, not on Aug 28.
+>
+> Confirmed Aug 24: with the accounting settled at 9.75 days across 11, this stop
+> is **load-bearing rather than a safety net**. Hold it strictly — one day, then
+> ship with the documented tolerance regardless of how close it feels.
 
 If the core itself (not parity) is still incomplete at end of day three, the cut
 list governs — see item 4.
@@ -342,6 +352,11 @@ eval reproduces through it, and the Rust-vs-NumPy table is published as measured
 - `score_batch` via zero-copy `PyReadonlyArray` (`numpy` crate); streaming
   `Detector.update`.
 - `--engine rust|python` on `spandan replay`; `ENGINE=` on `make eval`.
+- `python/spandan_core/__init__.py` re-exports the new surface **by name**
+  (`from ._native import Detector, score_batch, __version__`) with `__all__`
+  updated to match. Never a star-import: `help(spandan_core.Detector)` would pass
+  under a star-import while `__all__`-based checks and editor completion quietly
+  would not.
 - `make bench`: events/sec, p50/p95/p99 per-event latency, peak RSS, across batch
   sizes chosen to span the regime where NumPy is competitive **and** the regime
   where it is not.
@@ -433,11 +448,24 @@ feature. Any refactor.
 
 ```
 git clone . /tmp/spandan-fresh && cd /tmp/spandan-fresh
-make setup && make data && make eval        # full output; numbers match README exactly
+python -m venv .venv && . .venv/Scripts/activate    # fresh env INSIDE the clone
+python -c "import sys; print(sys.executable)"       # must be the clone's .venv
+make setup && make all                              # full output; numbers match README exactly
 pytest -q && cargo test
+git status --porcelain ; echo "porcelain exit=$? (output must be EMPTY)"
 ls docs/            # diagram + FAILURE_MODES.md + BENCH.md
 grep -c '^## ' BUILD_LOG.md                 # >= 4 entries
 ```
+
+Two criteria here are doing specific work and must not be softened:
+
+- **The venv is created inside the clone**, not inherited. The failure this catches
+  is not the stray `C:\Users\shiva\.venv` on the build machine — it is `make all`
+  passing because the global site-packages happens to hold something the clone
+  never declares in `pyproject.toml`.
+- **`git status --porcelain` must print nothing after `make all`.** This catches the
+  whole class of build-artifact leakage — the Phase 0 `.pdb` was one instance of it
+  — rather than one file at a time.
 
 **Effort.** 1.25 days. **Risk the estimate is wrong: low-medium.** README and the
 failure-modes write-up are the two places where "one more pass" is always
@@ -629,7 +657,22 @@ Mechanical: `/data/` is root-anchored in `.gitignore` and Phase 0 asserts
 `tests/fixtures/` is not ignored, so the committed parity fixture cannot be
 swallowed.
 
-**Open, not resolved:** the availability question in the schedule section
-(are Fri/Sat/Sun continuous hours, or heavier with other obligations?) came back
-blank in the approval note. Phase 3 remains on Fri/Sat/Sun on the original
-assumption until answered.
+**Open, not resolved (asked twice, blank twice):** the availability question in the
+schedule section — are Fri/Sat/Sun continuous hours, or heavier with other
+obligations? Both approval notes returned it as an unfilled placeholder. Phase 3
+stays on Fri/Sat/Sun on the original assumption until answered. It is the single
+input that moves the schedule most, and with slack down to 1.25 days it is worth
+one line to close.
+
+## Second review pass — Aug 24, after Phase 0
+
+1. **Extension layout approved** as the standard maturin mixed-project arrangement.
+   Re-export must stay explicit by name; pinned into Phase 4's in-scope list.
+2. **Build-artifact leakage** generalized into Phase 6: `git status --porcelain`
+   must be empty after `make all`.
+3. **Availability** still open; see above.
+4. **Accounting** settled at 9.75 days across 11, making Phase 3's parity stop
+   load-bearing. Phase 2 escalates on Aug 27 rather than absorbing into Sep 1.
+5. **Stray venv** is not to be deleted or modified. Phase 6 instead builds a fresh
+   venv inside the clone, which tests the real risk: undeclared dependencies
+   satisfied by the global environment.
