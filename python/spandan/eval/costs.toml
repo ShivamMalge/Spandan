@@ -1,0 +1,60 @@
+# Cost model parameters, in paise unless stated.
+#
+# Each entry carries its basis. Where there is no citable figure the entry says
+# so in its own `basis` field rather than being quietly asserted, because the
+# cost model is the centrepiece of this submission and a laundered assumption
+# inside it would be worse than an honest one.
+#
+# The manual review cost is deliberately NOT the input the headline rests on.
+# It is reported as a BREAK-EVEN output: "net stays positive while a review costs
+# under Rs X per alert." The value below is used only for the illustrative
+# headline line, and is labelled as an assumption everywhere it appears.
+
+[auth_fee]
+paise_per_blocked_attempt = 150
+basis = """Cost avoided per blocked authorization attempt. ASSUMPTION, not a
+citation. Razorpay's public pricing is charged on successful payments, so a
+per-attempt authorization cost is contract- and scheme-dependent rather than
+published. Set deliberately low (Rs 1.50) so that the headline saving does not
+lean on this number; the sweep shows the result is not sensitive to it."""
+
+[chargeback]
+fee_paise = 50000
+loss_fraction_of_amount = 1.0
+rate_on_approved_fraud = 0.8
+fee_basis = """Rs 500 per dispute. Razorpay's own published range for chargeback
+handling is Rs 200-750 for standard categories, with Rs 500-2,000 cited for
+higher-risk ones; Rs 500 sits mid-range and is the conservative choice for a
+card-testing context."""
+rate_basis = """Fraction of *approved* fraudulent transactions that become
+chargebacks. ASSUMPTION at 0.8: a card confirmed live by a successful low-value
+authorization is subsequently used, and the cardholder disputes. Not citable."""
+
+[blocked_good]
+contribution_margin = 0.25
+margin_basis = """What the merchant actually loses when a good transaction is
+blocked: the contribution margin on the sale, not its face value. Counting the
+full ticket would overstate false-positive cost several-fold. ASSUMPTION at 25%,
+a mid-range figure for Indian e-commerce."""
+
+only_charge_if_would_have_been_approved = true
+approval_basis = """Blocking a transaction that was going to be declined anyway
+costs the merchant nothing in margin. This matters most for the issuer-outage
+control, where ~82% of the traffic declines regardless, and ignoring it would
+inflate that scenario's false-positive cost by roughly 5x."""
+
+[review]
+assumed_cost_paise_per_alert = 4000
+basis = """Rs 40 per alert, used ONLY for the illustrative headline. ASSUMPTION,
+uncitable: roughly five minutes of an analyst's time at Indian fraud-ops rates.
+The defensible figure is the break-even the harness computes, which inverts this
+into an output: net stays positive while a review costs under Rs X."""
+
+[prevalence]
+target_rate = 0.0015
+basis = """Assumed realistic share of a merchant's authorization attempts that are
+card testing, for the reweighted precision figure. ASSUMPTION at 0.15%, NOT a
+citation - no public per-merchant card-testing prevalence figure was available at
+build time. The generator's own rate is ~1.4%, roughly 10x higher, which would
+flatter precision. Both numbers are reported side by side and this one is a knob,
+so the figure can be repriced by anyone who disagrees with it."""

@@ -73,3 +73,28 @@ the generator.
 **Worth noting:** the test that caught this was written to measure a property rather
 than to check that the code did what it was written to do. A test asserting "flash
 sale cards come from the benign pool" would have passed.
+
+## 2026-08-24 — the replay demo flagged the issuer outage; `make eval` did not
+**Phase:** 2
+**Symptom:** `spandan replay --limit 25000` printed flags on BIN 009064 across
+mer_002/004/005/006 — mean amount ₹2,602 against a baseline of ₹2,568, 77% declined,
+28 distinct cards in a 29-event window. That is the issuer-outage control, and the
+running exposure counter never moved, confirming label 0. Meanwhile `make eval`
+reported FP=0 on the same test window with the same threshold.
+**First believed:** a threshold mismatch between the two paths, or the CLI reading a
+stale `metrics.json`.
+**Actually wrong:** neither. `make eval` warms the detector on the full training
+window before scoring test; the CLI started from an empty state machine. With cold
+per-entity baselines the BIN's baseline window count sits near 1.0 with almost no
+variance, so an ordinary outage window scores 17-21 standard deviations above it.
+The eval was right and the demo was misleading — the worst way round, because the
+demo is what a reviewer watches.
+**Fix:** `spandan replay` now warms on `train.jsonl.gz` before replaying, matching
+the eval exactly, and a `--cold-start` flag shows the cold behaviour deliberately.
+**Proved by:** warmed — 230 flagged, 230 truly card testing, zero false positives.
+`--cold-start` — 29 flagged, 24 attack, 5 issuer_outage false positives.
+**The finding underneath the bug:** cold start is a real failure mode, not just a
+demo artifact. A detector deployed against a new merchant, or restarted, has no
+per-entity baseline and will over-flag exactly the traffic that most resembles an
+attack. It is now in `docs/FAILURE_MODES.md` with the numbers, and `--cold-start`
+exists so it can be demonstrated rather than described.

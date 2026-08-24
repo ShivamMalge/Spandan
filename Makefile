@@ -10,6 +10,7 @@
 .PHONY: setup test data eval bench demo all
 
 PY := python
+SEEDS ?= 3
 
 setup:
 	$(PY) -m pip install --upgrade pip
@@ -24,10 +25,10 @@ data:
 	$(PY) -m spandan.gen.summary --data data
 
 eval:
-	$(PY) scripts/notimpl.py 2 "make eval"
+	$(PY) -m spandan.eval.harness --data data --seeds $(SEEDS) --json-out data/metrics.json
 
 demo:
-	$(PY) scripts/notimpl.py 2 "make demo"
+	$(PY) -m spandan.cli replay --data data --limit 20000
 
 bench:
 	$(PY) scripts/notimpl.py 4 "make bench"
