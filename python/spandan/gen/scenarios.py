@@ -1,11 +1,11 @@
-"""The four labeled scenarios, as statistical signatures.
+"""The five labeled scenarios, as statistical signatures.
 
 Per `agents.md` §7 these are labeled test fixtures for a detector. Each is
 described by its signature only — event rate, how concentrated the entity axes
 are, the amount band, and the decline ratio — because that is exactly what a
 detector keys on and it is all the evaluation needs. Nothing here is a procedure.
 
-The four populations:
+The five populations — three attacks, two negative controls:
 
 - **burst** (label 1) — one BIN, one IP, one device, many distinct cards, a tight
   low-amount band, a high decline ratio, minutes of duration. The easy case, and
@@ -22,7 +22,18 @@ The four populations:
   ratio consistent with gateway strain. Its customers are a *mixture*: mostly
   known customers drawn with the same popularity weights as benign traffic, plus a
   minority of genuinely new ones. It looks like an attack on every volume-shaped
-  feature and is labeled clean. The false-positive cost model rests on this one.
+  feature and is labeled clean.
+- **issuer_outage** (label 0) — the harder negative control, and the one that
+  attacks the detector's *primary* axis. One BIN declining at card-testing rates
+  across entirely legitimate traffic because the issuer is down. Volume is
+  elevated by customer retries, so distinct cards are far fewer than events;
+  amounts are ordinary basket sizes rather than a low probe band; the cards are
+  known customers; and it spans several merchants at once, because an issuer's
+  customers shop in more than one place. Every one of those is a separator the
+  detector must find, and none of them is decline ratio.
+
+The two clean scenarios are the false-positive cost model's whole basis, and each
+is reported separately.
 """
 
 from __future__ import annotations
@@ -38,6 +49,7 @@ from .entities import Merchant
 from .schema import (
     ATTACK_SCENARIOS,
     SCENARIO_FLASH_SALE,
+    SCENARIO_ISSUER_OUTAGE,
     STATUS_APPROVED,
     STATUS_DECLINED,
     Event,
@@ -57,7 +69,11 @@ def generate_episode(
     merchants: list[Merchant],
     rng: np.random.Generator,
 ) -> list[Event]:
-    merchant = merchants[spec.merchant_index % len(merchants)]
+    span = max(1, min(spec.merchant_span, len(merchants)))
+    episode_merchants = [
+        merchants[(spec.merchant_index + k) % len(merchants)] for k in range(span)
+    ]
+    merchant_pick = rng.integers(0, span, size=spec.event_count)
 
     start_ms = STREAM_START_MS + int(spec.day * MS_PER_DAY)
     span_ms = int(spec.duration_minutes * MS_PER_MINUTE)
@@ -66,7 +82,10 @@ def generate_episode(
 
     if spec.scenario_id == SCENARIO_FLASH_SALE:
         cards, ips, devices, bins_ = _flash_sale_entities(spec, index, cfg, pools, rng)
-        amounts = _flash_sale_amounts(spec, cfg, merchant, rng)
+        amounts = _flash_sale_amounts(spec, cfg, episode_merchants[0], rng)
+    elif spec.scenario_id == SCENARIO_ISSUER_OUTAGE:
+        cards, ips, devices, bins_ = _issuer_outage_entities(spec, pools, rng)
+        amounts = _ordinary_amounts(spec, cfg, episode_merchants, merchant_pick, rng)
     else:
         cards, ips, devices, bins_ = _attack_entities(spec, index, pools, rng)
         amounts = rng.integers(
@@ -85,7 +104,7 @@ def generate_episode(
         Event(
             ts=int(timestamps[i]),
             txn_id="",
-            merchant_id=merchant.merchant_id,
+            merchant_id=episode_merchants[int(merchant_pick[i])].merchant_id,
             bin=bins_[int(bin_pick[i])],
             card_ref=cards[int(card_pick[i])],
             ip=ips[int(ip_pick[i])],
@@ -171,6 +190,67 @@ def _flash_sale_entities(
     bin_idx = rng.choice(len(pools.bins), size=bin_count, replace=False, p=pools.bin_weights)
     bins_ = [pools.bins[int(i)] for i in bin_idx]
     return cards, ips, devices, bins_
+
+
+def _issuer_outage_entities(
+    spec: ScenarioEpisodeSpec,
+    pools: EntityPools,
+    rng: np.random.Generator,
+) -> tuple[list[str], list[str], list[str], list[str]]:
+    """One BIN, and otherwise entirely ordinary customers.
+
+    Everything is drawn from the benign pools with benign popularity weights,
+    because that is what an outage *is*: the merchant's own traffic, declining.
+    No fresh identifiers at all — an outage brings no new customers, unlike a
+    sale.
+
+    The BIN is chosen from the popular end of the pool. A quiet BIN going down
+    would be unmeasurable; the interesting case is a large issuer, because that
+    is the one whose outage produces enough declines to look like an attack.
+    """
+    head = max(1, len(pools.bins) // 8)
+    bins_ = [pools.bins[int(rng.integers(0, head))]]
+
+    card_idx = rng.choice(
+        len(pools.cards), size=min(spec.distinct_cards, len(pools.cards)),
+        replace=False, p=pools.card_weights,
+    )
+    ip_idx = rng.choice(
+        len(pools.ips), size=min(spec.distinct_ips, len(pools.ips)),
+        replace=False, p=pools.ip_weights,
+    )
+    device_idx = rng.choice(
+        len(pools.devices), size=min(spec.distinct_devices, len(pools.devices)),
+        replace=False, p=pools.device_weights,
+    )
+    return (
+        [pools.cards[int(i)] for i in card_idx],
+        [pools.ips[int(i)] for i in ip_idx],
+        [pools.devices[int(i)] for i in device_idx],
+        bins_,
+    )
+
+
+def _ordinary_amounts(
+    spec: ScenarioEpisodeSpec,
+    cfg: GenConfig,
+    episode_merchants: list[Merchant],
+    merchant_pick: np.ndarray,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Each event drawn from its own merchant's ordinary amount distribution.
+
+    Not a band. An outage declines the basket the customer was already buying, so
+    the amount distribution is the merchant's usual one — which is one of the few
+    things separating it from a low-value probe burst.
+    """
+    amounts = np.zeros(spec.event_count, dtype=np.int64)
+    for slot, merchant in enumerate(episode_merchants):
+        mask = merchant_pick == slot
+        count = int(mask.sum())
+        if count:
+            amounts[mask] = _draw_amounts(rng, merchant, cfg, count)
+    return amounts
 
 
 def _flash_sale_amounts(

@@ -32,6 +32,7 @@ from .schema import (
     ATTACK_SCENARIOS,
     SCENARIO_BENIGN,
     SCENARIO_FLASH_SALE,
+    SCENARIO_ISSUER_OUTAGE,
     SCENARIOS,
     STATUS_DECLINED,
     Event,
@@ -133,6 +134,32 @@ def _negative_case_summary(events: list[Event]) -> dict:
     if not flash_cards:
         return {}
     known = len(flash_cards & benign_cards)
+
+    outage = [e for e in events if e.scenario_id == SCENARIO_ISSUER_OUTAGE]
+    outage_block: dict = {}
+    if outage:
+        outage_cards = {e.card_ref for e in outage}
+        outage_declines = sum(1 for e in outage if e.status == STATUS_DECLINED)
+        burst = [e for e in events if e.scenario_id == "burst"]
+        outage_block = {
+            "events": len(outage),
+            "distinct_cards": len(outage_cards),
+            "attempts_per_card": round(len(outage) / len(outage_cards), 3),
+            "decline_ratio": round(outage_declines / len(outage), 6),
+            "known_customer_share": round(
+                len(outage_cards & benign_cards) / len(outage_cards), 6
+            ),
+            "distinct_merchants": len({e.merchant_id for e in outage}),
+            "distinct_bins": len({e.bin for e in outage}),
+            "median_amount_paise": int(np.median([e.amount_paise for e in outage])),
+            "burst_median_amount_paise": (
+                int(np.median([e.amount_paise for e in burst])) if burst else None
+            ),
+            "burst_attempts_per_card": (
+                round(len(burst) / len({e.card_ref for e in burst}), 3) if burst else None
+            ),
+        }
+
     return {
         "flash_sale_distinct_cards": len(flash_cards),
         "flash_sale_known_customer_share": round(known / len(flash_cards), 6),
@@ -140,6 +167,7 @@ def _negative_case_summary(events: list[Event]) -> dict:
         "configured_new_entity_fraction": None,
         "attack_cards_seen_in_benign": len(attack_cards & benign_cards),
         "attack_distinct_cards": len(attack_cards),
+        "issuer_outage": outage_block,
     }
 
 

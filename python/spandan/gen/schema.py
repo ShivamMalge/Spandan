@@ -32,14 +32,26 @@ SCENARIO_BURST = "burst"
 SCENARIO_ROTATING = "rotating"
 SCENARIO_SLOW_LOW = "slow_low"
 SCENARIO_FLASH_SALE = "flash_sale"
+SCENARIO_ISSUER_OUTAGE = "issuer_outage"
 
 #: Scenarios whose events carry label 1.
 ATTACK_SCENARIOS = (SCENARIO_BURST, SCENARIO_ROTATING, SCENARIO_SLOW_LOW)
 
-#: Scenarios whose events carry label 0. `flash_sale` is the important one: it is
-#: a volume surge that looks like an attack on every volume-shaped feature and is
-#: labeled clean. It is the false-positive test the whole cost model rests on.
-CLEAN_SCENARIOS = (SCENARIO_BENIGN, SCENARIO_FLASH_SALE)
+#: Scenarios whose events carry label 0. Two of them are deliberate negative
+#: controls, each attacking a different one of the detector's axes:
+#:
+#: - `flash_sale` attacks the **volume** axis: a genuine surge that looks like an
+#:   attack on every volume-shaped feature.
+#: - `issuer_outage` attacks the **decline-ratio** axis, which is the detector's
+#:   primary signal: entirely legitimate traffic on one BIN declining at
+#:   card-testing rates because the issuer is down, with customers retrying.
+#:
+#: A detector that flags either is expensive to run, and the rupee cost model
+#: reports each separately.
+CLEAN_SCENARIOS = (SCENARIO_BENIGN, SCENARIO_FLASH_SALE, SCENARIO_ISSUER_OUTAGE)
+
+#: The labeled-clean scenarios that exist specifically to be hard.
+NEGATIVE_CONTROLS = (SCENARIO_FLASH_SALE, SCENARIO_ISSUER_OUTAGE)
 
 SCENARIOS = CLEAN_SCENARIOS + ATTACK_SCENARIOS
 

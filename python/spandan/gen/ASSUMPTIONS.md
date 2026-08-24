@@ -91,7 +91,7 @@ collides with anything real is checkable rather than asserted (`agents.md` §7).
 `test_all_identifiers_synthetic` and `test_no_card_reference_could_be_mistaken_for_a_pan`
 check every event, not a sample.
 
-### 1.7 The four scenarios
+### 1.7 The five scenarios
 
 Described as statistical signatures — rate, entity concentration, amount band,
 decline ratio — and nothing else (`agents.md` §7). Each appears in both the train
@@ -103,7 +103,8 @@ select a threshold on a validation window.
 | `burst` | 1 | One BIN, one IP, one device, 190–300 distinct cards, ₹1–₹60 band, decline ratio 0.83–0.89, 9–15 minutes. |
 | `rotating` | 1 | Same BIN and card concentration; IP and device spread across 55–74 values, 22–31 minutes. No single address carries unusual volume. |
 | `slow_low` | 1 | Same concentration, 48–66 events spread over 5.5–7 hours, decline ratio 0.69–0.75. Sits underneath a fixed per-window count. |
-| `flash_sale` | **0** | 760–1,020 distinct cards over 45–60 minutes, many issuers, ordinary amounts, decline ratio 0.14–0.17. |
+| `flash_sale` | **0** | 760–1,020 distinct cards over 45–60 minutes, many issuers, ordinary amounts, decline ratio 0.14–0.17. Negative control on the **volume** axis. |
+| `issuer_outage` | **0** | One BIN, 55–78 minutes, 760–1,050 events across only 250–340 cards (retries), ordinary amounts, decline ratio 0.79–0.86, spanning 4–5 merchants. Negative control on the **decline-ratio** axis — see §1.7b. |
 
 Two modelling choices inside these matter more than the numbers:
 
@@ -141,6 +142,77 @@ This is the single most load-bearing choice in the file:
 So novelty alone decides nothing, and the detector has to earn its separation from
 velocity, concentration and decline structure.
 
+### 1.7a BINDING CONSTRAINT — no card-novelty feature, in any phase
+
+This is a standing constraint on the detector's design, not a note.
+
+The two populations differ in card novelty:
+
+| Population | Cards never seen elsewhere in the stream |
+|---|---|
+| Attack scenarios (`burst`, `rotating`, `slow_low`) | **100%** — 0 of 1,834 attack cards appear in benign traffic |
+| `flash_sale` | **42.5%** |
+| `issuer_outage` | **10.1%** |
+
+So the flash sale controls fully for **volume** and only **partially** for
+**novelty**. A detector that keyed on "share of never-before-seen cards" would
+separate attacks from sales partly for free, and the reported precision would be
+measuring an artifact of the generator rather than a property of the detector.
+
+**That is acceptable only because no card-novelty feature exists anywhere in the
+design.** The five Rust modules key on BIN, IP, device and merchant velocity, and
+on decline ratio. None of them tracks whether a card has been seen before.
+
+Therefore, binding on Phase 2 and Phase 3:
+
+> **No feature may be derived from card novelty, first-seen-ness, or distinct-card
+> counts used as a proxy for novelty.** If such a feature is ever added, the flash
+> sale immediately ceases to be a valid negative control, and the negative case
+> has to be rebuilt before any metric is reported.
+
+`tests/test_gen.py::test_no_card_novelty_feature_exists_anywhere` enforces this by
+scanning the detector packages, so the constraint fails a test rather than relying
+on anyone remembering it.
+
+### 1.7b The issuer-outage negative control
+
+The second labeled-clean scenario, and the harder of the two, because it attacks
+the detector's **primary** axis rather than a secondary one.
+
+An issuer outage produces an elevated decline ratio concentrated on a single BIN
+from entirely legitimate traffic. That is, feature for feature, the card-testing
+signature — with no attacker present. It is common in real payments, and it is the
+first false-positive case a risk panel raises.
+
+Measured on the shipped stream:
+
+| Property | issuer_outage | burst | What it means |
+|---|---|---|---|
+| Decline ratio | **82.4%** | 83–89% | Indistinguishable on the primary signal |
+| Distinct BINs | 4 (one per episode) | 1 per episode | Equally concentrated |
+| Attempts per card | **5.36** | 1.58 | Customers retry a declined payment; a probe does not revisit a dead card |
+| Median amount | **₹1,664** | ₹26 | Ordinary basket, not a low probe band |
+| Known-customer share | **89.9%** | 0% | Existing customers with existing baselines |
+| Merchants spanned | 4–5 per episode | 1 | An issuer's customers shop in more than one place |
+
+The four rows in bold are the separators available to the detector, and **none of
+them is decline ratio**. This makes the control hard but learnable: if the outage
+were separable only by decline ratio it would be genuinely indistinguishable from
+card testing, and including it would be setting an impossible bar rather than a
+demanding one.
+
+Volume is elevated during an outage because customers retry — which is why this
+is a genuine test of the velocity features too, not only of the decline features.
+
+Its false-positive count and rupee cost are reported separately from the flash
+sale's, because they are different failure modes with different operational
+responses: a flash sale is a merchant event, an outage is an issuer event.
+
+`test_issuer_outage_attacks_the_primary_signal` and
+`test_issuer_outage_is_separable_from_a_burst_without_decline_ratio` assert both
+halves — that it is attack-like on the primary axis, and that the separators
+actually exist.
+
 ### 1.8 Determinism
 
 One `SeedSequence` spawns independent streams for pools, merchants, benign
@@ -169,12 +241,17 @@ days apart from the diurnal and weekend terms. Real streams have paydays, sale
 seasons and campaign spikes. A baseline estimator that would drift on real data
 has nothing here to drift against.
 
-**2.3 Stationary benign decline rates.** Each merchant's decline rate is fixed for
-the whole stream. In reality, issuer outages and gateway incidents cause decline
-rates to move sharply for tens of minutes — one of the most common causes of a
-real false positive for exactly this kind of detector. **This stream contains no
-issuer-outage scenario**, so the evaluation cannot measure that failure mode. It
-belongs in the failure-modes section as a known blind spot, not as a result.
+**2.3 Benign decline rates are stationary apart from the modelled outages.** Each
+merchant's *baseline* decline rate is fixed for the whole stream. The one modelled
+departure is the `issuer_outage` scenario (§1.7b), which is generated, labeled
+clean, and costed — so the most common real false-positive cause for this class of
+detector is measured rather than disclosed.
+
+What remains unmodelled is the milder end of the same phenomenon: gateway
+incidents that lift decline rates by a few points for minutes at a time, and
+acquirer-side routing changes. Those are frequent and small, where the modelled
+outages are rarer and large. A detector tuned against only the large case may
+still over-flag the small one.
 
 **2.4 Independent arrivals.** Poisson means no bursts within benign traffic beyond
 Poisson variance — no viral moments, no retry storms after a network blip, no
@@ -197,10 +274,14 @@ lower and far more concentrated in time. A higher positive rate makes precision
 easier to achieve than it would be in production. **Any precision figure here
 should be read as an upper bound.**
 
-**2.8 Attack episodes are single-merchant.** Each episode targets one merchant.
-Real campaigns sweep many merchants on the same acquirer simultaneously; the
-cross-merchant correlation that would make such a campaign easier to spot is
-absent here, which makes this stream harder on that axis.
+**2.8 Attack episodes are single-merchant.** Each attack episode targets one
+merchant. Real campaigns sweep many merchants on the same acquirer simultaneously;
+the cross-merchant correlation that would make such a campaign easier to spot is
+absent here, which makes this stream harder on that axis. Note the asymmetry this
+creates with §1.7b: outages span merchants and attacks do not, so merchant span is
+a stronger separator here than it would be against a real multi-merchant campaign.
+A detector that leans hard on merchant span will look better here than it should,
+and that belongs in the failure-modes section.
 
 **2.9 Labels are perfect.** Every event's ground truth is known exactly, because
 the generator wrote it. Real labels arrive late, incomplete and partly wrong —

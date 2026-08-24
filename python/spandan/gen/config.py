@@ -49,6 +49,12 @@ class ScenarioEpisodeSpec:
     amount_min_paise: int
     amount_max_paise: int
     merchant_index: int
+    merchant_span: int = 1
+    """How many merchants the episode covers, starting at `merchant_index`.
+
+    Card testing hits one merchant at a time. An issuer outage hits every
+    merchant that issuer's customers shop at simultaneously — which is one of the
+    few features that separates the two, so it has to be modelled."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,6 +172,24 @@ _EPISODES: tuple[ScenarioEpisodeSpec, ...] = (
     ScenarioEpisodeSpec("flash_sale", 8.70, 45.0, 760, 745, 705, 690, 0.15, 25_000, 750_000, 7),
     ScenarioEpisodeSpec("flash_sale", 11.20, 60.0, 1_020, 995, 950, 920, 0.17, 15_000, 850_000, 0),
     ScenarioEpisodeSpec("flash_sale", 12.40, 50.0, 820, 800, 765, 740, 0.14, 20_000, 800_000, 9),
+    # -- issuer outage: labeled CLEAN, and the harder of the two negative
+    #    controls. Entirely legitimate traffic on ONE BIN, declining at
+    #    card-testing rates because the issuer is down. That is the detector's
+    #    primary signal — elevated decline ratio concentrated on a BIN — produced
+    #    with no attacker present.
+    #
+    #    What separates it from a burst, and what the detector has to find:
+    #      * volume is elevated by *retries*, so distinct cards are far fewer
+    #        than events (customers retry; a tester does not retry a dead card)
+    #      * amounts are ordinary basket sizes, not a tight low probe band
+    #      * the cards are known customers with existing baselines
+    #      * it spans several merchants at once, because an issuer's customers
+    #        shop in more than one place
+    ScenarioEpisodeSpec("issuer_outage", 1.90, 62.0, 880, 290, 275, 265, 0.83, 1_000, 5_000_00, 0, 4),
+    ScenarioEpisodeSpec("issuer_outage", 5.30, 78.0, 1_050, 340, 320, 310, 0.79, 1_000, 5_000_00, 3, 5),
+    ScenarioEpisodeSpec("issuer_outage", 8.95, 55.0, 760, 250, 240, 230, 0.86, 1_000, 5_000_00, 5, 4),
+    ScenarioEpisodeSpec("issuer_outage", 11.70, 70.0, 960, 315, 300, 290, 0.81, 1_000, 5_000_00, 2, 5),
+    ScenarioEpisodeSpec("issuer_outage", 13.30, 58.0, 800, 265, 250, 245, 0.84, 1_000, 5_000_00, 6, 4),
 )
 
 DEFAULT_CONFIG = GenConfig(episodes=_EPISODES)

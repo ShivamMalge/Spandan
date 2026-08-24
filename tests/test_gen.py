@@ -31,8 +31,10 @@ from spandan.gen.schema import (
     ATTACK_SCENARIOS,
     FEATURE_COLUMNS,
     LABEL_COLUMNS,
+    NEGATIVE_CONTROLS,
     SCENARIO_BENIGN,
     SCENARIO_FLASH_SALE,
+    SCENARIO_ISSUER_OUTAGE,
     STATUS_DECLINED,
     Event,
 )
@@ -49,6 +51,8 @@ _SMALL_EPISODES = (
     ScenarioEpisodeSpec("rotating", 3.60, 20.0, 130, 130, 28, 26, 0.85, 100, 5_000, 0),
     ScenarioEpisodeSpec("slow_low", 3.10, 200.0, 36, 36, 3, 3, 0.73, 100, 3_000, 1),
     ScenarioEpisodeSpec("flash_sale", 3.80, 40.0, 280, 260, 250, 240, 0.15, 20_000, 900_000, 2),
+    ScenarioEpisodeSpec("issuer_outage", 2.60, 60.0, 400, 130, 125, 120, 0.83, 1_000, 5_000_00, 0, 3),
+    ScenarioEpisodeSpec("issuer_outage", 3.45, 55.0, 360, 120, 115, 110, 0.81, 1_000, 5_000_00, 1, 3),
 )
 
 SMALL_CONFIG = GenConfig(
@@ -197,6 +201,105 @@ def test_flash_sale_is_a_mixture_of_known_and_new_customers(built):
     assert not (attack_cards & benign_cards)
 
 
+# --- the issuer-outage negative control ------------------------------------
+#
+# These assert properties of the generated stream, not that the generator did
+# what it was written to do. A test that mirrors the code passes forever while
+# the property it was supposed to protect quietly rots - which is exactly how the
+# Zipf bug in the flash sale survived until something measured the output.
+
+
+def test_issuer_outage_events_labeled_clean(built):
+    outage = [e for e in _all_events(built) if e.scenario_id == SCENARIO_ISSUER_OUTAGE]
+    assert outage, "no issuer-outage events were generated"
+    assert all(e.label == 0 for e in outage)
+    assert SCENARIO_ISSUER_OUTAGE in NEGATIVE_CONTROLS
+    assert any(e.scenario_id == SCENARIO_ISSUER_OUTAGE for e in built["train"])
+    assert any(e.scenario_id == SCENARIO_ISSUER_OUTAGE for e in built["test"])
+
+
+def test_issuer_outage_attacks_the_primary_signal(built):
+    """The control is worthless unless it actually looks like the thing.
+
+    The detector's primary signal is an elevated decline ratio concentrated on a
+    BIN. If the outage does not produce that from clean traffic, it is not
+    testing anything.
+    """
+    events = _all_events(built)
+    outage = [e for e in events if e.scenario_id == SCENARIO_ISSUER_OUTAGE]
+    benign = [e for e in events if e.scenario_id == SCENARIO_BENIGN]
+
+    outage_decline = sum(1 for e in outage if e.status == STATUS_DECLINED) / len(outage)
+    benign_decline = sum(1 for e in benign if e.status == STATUS_DECLINED) / len(benign)
+    assert outage_decline > 0.6, f"outage decline ratio {outage_decline:.2%} is not attack-like"
+    assert outage_decline > 6 * benign_decline
+
+    # Concentrated on very few BINs, like an attack would be.
+    assert len({e.bin for e in outage}) <= 4
+
+
+def test_issuer_outage_is_separable_from_a_burst_without_decline_ratio(built):
+    """Every separator the detector is allowed to use, measured.
+
+    If the outage were separable *only* by decline ratio it would be
+    indistinguishable from card testing and the negative control would be
+    unlearnable rather than hard. These four properties are what make it
+    learnable - and none of them is decline ratio.
+    """
+    events = _all_events(built)
+    outage = [e for e in events if e.scenario_id == SCENARIO_ISSUER_OUTAGE]
+    burst = [e for e in events if e.scenario_id == "burst"]
+    benign_cards = {e.card_ref for e in events if e.scenario_id == SCENARIO_BENIGN}
+
+    # 1. Retries: an outage re-attempts the same card; a probe burst does not.
+    outage_attempts = len(outage) / len({e.card_ref for e in outage})
+    burst_attempts = len(burst) / len({e.card_ref for e in burst})
+    assert outage_attempts > 2.0, f"only {outage_attempts:.2f} attempts per card"
+    assert outage_attempts > 2 * burst_attempts
+
+    # 2. Ordinary basket sizes, not a low probe band.
+    outage_median = sorted(e.amount_paise for e in outage)[len(outage) // 2]
+    burst_median = sorted(e.amount_paise for e in burst)[len(burst) // 2]
+    assert outage_median > 10 * burst_median
+
+    # 3. Known customers with existing baselines.
+    outage_cards = {e.card_ref for e in outage}
+    known = len(outage_cards & benign_cards) / len(outage_cards)
+    assert known > 0.75, f"only {known:.1%} of outage cards are known customers"
+
+    # 4. Multi-merchant: an issuer's customers shop in more than one place,
+    #    where a card-testing episode targets one merchant at a time.
+    assert len({e.merchant_id for e in outage}) > 1
+    for spec_id in ("burst", "rotating", "slow_low"):
+        per_episode = {e.merchant_id for e in events if e.scenario_id == spec_id}
+        assert per_episode, spec_id
+
+
+def test_no_card_novelty_feature_exists_anywhere(built):
+    """A standing constraint, enforced rather than remembered.
+
+    Attack cards are 100% novel; flash-sale cards are only ~43% novel. The sale
+    therefore controls for volume but only partially for novelty, which is
+    acceptable *only* because no card-novelty feature exists in the design. If
+    one is ever added, the flash sale stops being a valid negative control and
+    the negative case has to be rebuilt.
+
+    This test fails the moment a module starts tracking first-seen cards.
+    """
+    import spandan
+    from pathlib import Path
+
+    banned = ("first_seen", "novel_card", "card_novelty", "unseen_card", "new_card")
+    root = Path(spandan.__file__).parent
+    offenders = []
+    for path in root.rglob("*.py"):
+        if "gen" in path.parts:
+            continue  # the generator knows about novelty; the detector may not
+        text = path.read_text(encoding="utf-8").lower()
+        offenders.extend(f"{path.name}:{token}" for token in banned if token in text)
+    assert not offenders, f"card-novelty feature detected: {offenders}"
+
+
 def test_attack_bins_also_appear_in_benign_traffic(built):
     """Attack episodes borrow a BIN that has its own legitimate baseline.
 
@@ -265,4 +368,4 @@ def test_full_config_uses_the_same_reserved_ranges():
     assert DEFAULT_CONFIG.benign_decline_rate_min > 0.0
     assert DEFAULT_CONFIG.train_days < DEFAULT_CONFIG.total_days
     scenario_ids = {spec.scenario_id for spec in DEFAULT_CONFIG.episodes}
-    assert scenario_ids == {"burst", "rotating", "slow_low", "flash_sale"}
+    assert scenario_ids == {"burst", "rotating", "slow_low", "flash_sale", "issuer_outage"}

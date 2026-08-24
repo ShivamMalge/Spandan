@@ -6,8 +6,8 @@ criterion below is a command whose output goes in the review, not a claim.
 **Approved Aug 24 with six edits; edits applied, provenance recorded at the foot of
 this file.**
 
-Total estimated work: **9.75 days** across **11 calendar days** (Aug 24 – Sep 3).
-That leaves ~1.25 days of true slack. It is thin. The cut list at the end of this
+Total estimated work: **10.0 days** across **11 calendar days** (Aug 24 – Sep 3).
+That leaves ~1.0 day of true slack. It is thin. The cut list at the end of this
 file, not the schedule, is the real slack — read it as part of the plan, not as an
 appendix.
 
@@ -174,8 +174,23 @@ NumPy baseline.
 - `python/spandan/eval/` — loader that **refuses** a non-temporal split; a
   validation window carved from the training period (all thresholding happens
   there, `agents.md` §6); precision, recall, F1, PR-AUC; per-scenario recall
-  breakdown; ablation runner (drop EWMA / drop Welford / drop per-IP / drop
-  per-device — all four; trimming is a Sep 1 decision, not a Phase 2 one).
+  breakdown; **ablation runner with two ablations — drop-EWMA and drop-per-IP.**
+  (Cut from four on Aug 24, pulled forward from the Sep 1 decision point to fund
+  the issuer-outage control. Drop-Welford and drop-per-device are gone; these two
+  are the ones a payments panel actually asks about.)
+- **Precision at a stated prevalence, not only at the generator's.** Recall is
+  prevalence-independent; precision is not, and the generator's ~1.4% positive
+  rate is far above a real merchant card-testing rate. So the harness reweights
+  the false-positive contribution to a target prevalence and reports precision at
+  **both** the observed rate and a stated realistic one. The assumed rate is
+  named and sourced in `costs.toml`, or explicitly flagged as an assumption if no
+  citation is available. This converts "treat precision as an upper bound" from a
+  disclaimer into a defensible number, and pre-empts the obvious panel challenge.
+- **Both negative controls costed separately.** `flash_sale` (volume axis) and
+  `issuer_outage` (decline-ratio axis) get their own false-positive counts and
+  their own rupee lines. They are different failure modes with different
+  operational responses — a merchant event versus an issuer event — and averaging
+  them hides which one the detector is bad at.
 - **Cost-vs-threshold sweep** (replaces the calibration curve, which is dropped on
   merit: the score is a deviation from a per-entity baseline, not a probability
   estimate, so calibration answers a question nobody asked). Net rupee position
@@ -219,15 +234,18 @@ make eval
   # prints, in order:
   #   threshold provenance line: chosen on validation window [t0, t1), never test
   #   metrics table: precision, recall, F1, PR-AUC at the chosen threshold
-  #   per-scenario recall: burst / rotating / slow-and-low / (flash sale: FP count)
+  #   per-scenario recall: burst / rotating / slow-and-low
   #   time-to-detection per scenario: median and p90 events elapsed, rupees exposed
-  #   flash-sale false positives and their rupee cost
+  #   NEGATIVE CONTROLS, reported separately:
+  #     flash_sale    false positives + rupee cost   (volume axis)
+  #     issuer_outage false positives + rupee cost   (decline-ratio axis)
   #   cost table: saved auth fees + avoided chargeback exposure
   #               - blocked-good value = GROSS rupees
   #   BREAK-EVEN review cost: net positive while review < Rs.X per alert
   #   alerts per day at the chosen threshold
   #   cost-vs-threshold sweep: net rupees across the range, chosen point marked
-  #   ablation table: full / -EWMA / -Welford / -perIP / -perDevice
+  #   ablation table: full / -EWMA / -perIP
+  #   precision at observed prevalence AND at the stated target prevalence
   #   multi-seed spread: min/median/max per headline metric over 3 seeds
 make eval SEEDS=3    # or however the harness takes it; the spread table is the output
 pytest tests/test_eval.py -v
@@ -239,6 +257,10 @@ pytest tests/test_eval.py -v
   #   test_pr_auc_matches_sklearn_reference
   #   test_ablation_toggle_changes_active_feature_set
   #   test_flash_sale_alert_count_is_reported_not_suppressed
+  #   test_issuer_outage_alert_count_is_reported_separately
+  #   test_precision_reweighting_matches_hand_worked_example
+  #   test_reweighting_leaves_recall_unchanged
+  #   test_no_card_novelty_feature_in_detector   (binding, see ASSUMPTIONS 1.7a)
   #   test_time_to_detection_counts_events_before_first_flag
   #   test_time_to_detection_is_infinite_when_scenario_never_flagged
   #   test_multi_seed_spread_reported_for_all_headline_metrics
@@ -259,7 +281,13 @@ legitimate Phase 2 outcome and a strong failure-modes section. The gate is that 
 number is measured and reported, not that it is good. One round of window-size/
 threshold iteration is budgeted, on the validation window only.
 
-**Accounting, settled Aug 24:** dropping the calibration curve frees nothing. The
+**Accounting, revised Aug 24 (second pass):** the issuer-outage control adds ~0.5
+day and the prevalence reweighting ~1 hour; cutting ablations from four to two
+returns ~3 hours. Net **+0.25 day**, taking the project total to 10.0 days across
+11 and slack to ~1.0 day. Availability is not the binding constraint — the binding
+constraint is the calendar.
+
+**Accounting, settled Aug 24 (first pass):** dropping the calibration curve frees nothing. The
 cost-vs-threshold sweep replaces it at roughly equal cost and additions 5 and 6
 (multi-seed, time-to-detection) are net new work — a quarter-day increase, which is
 why Phase 2 is 2.25 days and the project total is 9.75 across 11. Phase 3's parity
@@ -490,14 +518,15 @@ available; the fresh-clone reproduction is the hard stop.
 | Sep 3 | Thu | Finish Phase 6 → gate. Record video. Submit before end of day. |
 | Sep 4–5 | Fri–Sat | Hard buffer only. Not planned work. Do not spend in advance. |
 
-Phase 3's three days land Fri/Sat/Sun deliberately — it is the longest continuous
-stretch and the weekend is where a solo builder with other obligations most likely
-has continuous hours. If that assumption is wrong for you, say so now; it changes
-the schedule more than any other single input.
+Phase 3's three days land Fri/Sat/Sun. Availability is flat across the week
+(confirmed Aug 24), so this is no longer a capacity assumption — it is simply the
+longest phase sitting on three consecutive days.
 
-The schedule assumes roughly six focused hours a day. It is not a sprint plan, but
-1.25 days of slack over 11 days is not generous either. The cut list is the rest of
-the slack.
+The schedule assumes roughly six focused hours a day. Availability is not the
+limit here, but planning at that rate is deliberate: a schedule that only closes at
+twelve-hour days has no slack in it, and the review cycle between gates is real
+elapsed time regardless. ~1.0 day of slack over 11 days is thin, so the cut list is
+the rest of the slack.
 
 ---
 
@@ -571,21 +600,24 @@ The one-page FastAPI view and the calibration curve are **no longer on this list
 both are cut outright by decision (the CLI demos better on video; calibration
 answers no question the panel asked). They are not schedule levers.
 
+**Already executed, no longer available as slack:** the ablation trim from four to
+two was pulled forward to Aug 24 to fund the issuer-outage control. Phase 2 builds
+two ablations, not four. That ~3 hours has been spent.
+
 1. **The Razorpay webhook / evidence-mapper stretch.** Formally dead on Aug 31.
-2. **Ablations trimmed from four to two** — keep drop-EWMA and drop-per-IP, the two
-   the panel will ask about. ~3 hours. **This is a Sep 1 decision; Phase 2 builds
-   all four.**
-3. **The per-device entity axis.** Costs recall on the rotating-IP/device scenario.
+2. **The per-device entity axis.** Costs recall on the rotating-IP/device scenario.
    Report the loss as a measured failure mode; that is on-message, not an excuse.
-4. **The Rust core** — ship the Python engine only, and say so in the README
+3. **The Rust core** — ship the Python engine only, and say so in the README
    without spin. This is the largest credibility loss on the list: the architecture
    walkthrough is partly a Rust-streaming story. Only if Phase 3 has not gated by
-   Sep 1, and only after items 1–3.
+   Sep 1, and only after items 1–2.
 
-**Not cuttable, though both are cheap enough to look like candidates:**
-time-to-detection (it is on the load-bearing floor), and multi-seed stability —
-reporting a single seed's numbers as if they were stable is precisely the failure
-this project exists to avoid. Reduce to two seeds before dropping it.
+**Not cuttable, though all four are cheap enough to look like candidates:**
+time-to-detection and the prevalence reweighting (both on the load-bearing floor);
+the `issuer_outage` control, which was bought at the cost of two ablations and is
+worth more than the two it replaced; and multi-seed stability — reporting a single
+seed's numbers as if they were stable is precisely the failure this project exists
+to avoid. Reduce to two seeds before dropping that one.
 
 **Cut before the LLM layer, not after.** At 0.75 day the LLM layer is cheaper than
 almost everything above it, and this is an AI buildathon track — a submission with
@@ -596,8 +628,9 @@ rather than shipping something half-wired.
 ### Load-bearing floor — not worth submitting without
 
 - The generator with a strict temporal split and ASSUMPTIONS.md.
-- Precision, recall, and PR-AUC per scenario, including the flash-sale
-  false-positive count.
+- Precision, recall, and PR-AUC per scenario, with **both** negative controls'
+  false-positive counts reported separately (`flash_sale`, `issuer_outage`).
+- **Precision at a stated realistic prevalence**, not only at the generator's.
 - **Time-to-detection per scenario** — median events and rupees exposed before the
   first flag.
 - The rupee cost model with cited parameters, a net position, the **break-even
@@ -657,12 +690,37 @@ Mechanical: `/data/` is root-anchored in `.gitignore` and Phase 0 asserts
 `tests/fixtures/` is not ignored, so the committed parity fixture cannot be
 swallowed.
 
-**Open, not resolved (asked twice, blank twice):** the availability question in the
-schedule section — are Fri/Sat/Sun continuous hours, or heavier with other
-obligations? Both approval notes returned it as an unfilled placeholder. Phase 3
-stays on Fri/Sat/Sun on the original assumption until answered. It is the single
-input that moves the schedule most, and with slack down to 1.25 days it is worth
-one line to close.
+**Availability — CLOSED Aug 24.** No weekday/weekend asymmetry; capacity is not a
+constraint on this build. Consequences:
+
+- Phase 3 stays on Fri 28 – Sun 30 Aug. No reshuffle needed.
+- The schedule keeps its ~6 focused hours/day planning basis. Surplus capacity is
+  treated as **real slack, not as schedulable hours** — planning against long days
+  is how estimates fail, and a plan that only works at 14 hours a day has no slack
+  at all.
+- The binding constraint is therefore the calendar and the review cycle, not hours
+  available. That makes the cut list, not the clock, the thing to watch.
+
+## Third review pass — Aug 24, after Phase 1
+
+Phase 1 gated. Five scope changes, all applied:
+
+1. **Issuer-outage negative control built** (~0.5 day) — labeled clean, attacking
+   the detector's *primary* axis: 82.4% declines concentrated on one BIN from
+   entirely legitimate traffic. Separable from a burst by retries (5.36 vs 1.58
+   attempts/card), ordinary amounts (₹1,664 vs ₹26 median), known customers
+   (89.9%) and merchant span (4–5 vs 1) — and by none of those being decline
+   ratio. Reported and costed separately from the flash sale.
+2. **Ablations cut four → two** (drop-EWMA, drop-per-IP), pulled forward from the
+   Sep 1 decision point to fund it. That slack is now spent.
+3. **Prevalence reweighting** added to Phase 2: precision reported at both the
+   observed ~1.4% and a stated realistic merchant card-testing rate.
+4. **Card-novelty features banned** in Phases 2 and 3, enforced by a test rather
+   than remembered. See `gen/ASSUMPTIONS.md` §1.7a — the flash sale controls fully
+   for volume but only partially for novelty, which is acceptable *only* while no
+   novelty feature exists.
+5. **Availability closed**; the Zipf BUILD_LOG entry marked as the pitch-video
+   "what broke" beat.
 
 ## Second review pass — Aug 24, after Phase 0
 

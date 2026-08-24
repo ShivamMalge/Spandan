@@ -40,6 +40,12 @@ expects; the zero-copy NumPy one is still ahead.
 
 ## 2026-08-24 — the benign flash sale was separable by entity novelty alone
 **Phase:** 1
+**PITCH-VIDEO CANDIDATE** — the "what broke" beat. The point of the story is not
+the bug, it is that the test which caught it asserted a property of the *output*
+rather than checking that the code did what it was written to do. A code-mirroring
+test would have passed forever and the leak would have surfaced in Phase 2 as
+suspiciously good precision, which is the hardest kind of error to notice because
+it looks like success.
 **Symptom:** `test_flash_sale_is_a_mixture_of_known_and_new_customers` (then named
 `test_flash_sale_reuses_benign_entities`) failed: only **66%** of flash-sale cards
 had ever appeared in benign traffic, against an expected >90%.

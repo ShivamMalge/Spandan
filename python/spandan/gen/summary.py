@@ -83,6 +83,18 @@ def render(manifest: dict) -> None:
         print("  A sale made only of unseen cards would be separable by novelty alone,")
         print("  which would make the false-positive test worthless. Measured, not assumed.")
 
+        outage = negative.get("issuer_outage") or {}
+        if outage:
+            print()
+            print("issuer outage - the control that attacks the PRIMARY axis:")
+            print(f"  decline ratio                  {outage['decline_ratio']:.1%}   (card-testing rates, no attacker)")
+            print(f"  distinct BINs                  {outage['distinct_bins']}       (concentrated, like an attack)")
+            print("  what a detector must use to tell it apart from a burst:")
+            print(f"    attempts per card            {outage['attempts_per_card']:>8}  vs burst {outage['burst_attempts_per_card']}  (retries, not fresh cards)")
+            print(f"    median amount                {outage['median_amount_paise']/100:>8.0f}  vs burst {outage['burst_median_amount_paise']/100:.0f}  (rupees: ordinary basket, not a probe band)")
+            print(f"    known customer share         {outage['known_customer_share']:>8.1%}")
+            print(f"    merchants spanned            {outage['distinct_merchants']:>8}  (an issuer's customers shop in more than one place)")
+
     _rule("temporal split")
     split = manifest["split"]
     print(f"train_max_ts  {split['train_max_ts']}  {_ist(split['train_max_ts'])}")
