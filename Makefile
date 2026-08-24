@@ -20,7 +20,8 @@ test:
 	$(PY) -m pytest -q
 
 data:
-	$(PY) scripts/notimpl.py 1 "make data"
+	$(PY) -m spandan.gen.build --out data
+	$(PY) -m spandan.gen.summary --data data
 
 eval:
 	$(PY) scripts/notimpl.py 2 "make eval"
