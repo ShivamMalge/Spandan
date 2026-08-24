@@ -58,3 +58,21 @@ citation - no public per-merchant card-testing prevalence figure was available a
 build time. The generator's own rate is ~1.4%, roughly 10x higher, which would
 flatter precision. Both numbers are reported side by side and this one is a knob,
 so the figure can be repriced by anyone who disagrees with it."""
+
+[operations]
+alerts_per_day_budget = 10
+budget_basis = """How many alerts one analyst can plausibly work through in a day,
+and the CONSTRAINT the operating point is chosen under. ASSUMPTION at 10/day:
+alert triage is one of several duties for a single-analyst merchant risk function,
+each alert costs roughly five minutes to open plus follow-up on the real ones, and
+a queue that outruns the person reviewing it stops being reviewed at all.
+
+This is a knob on purpose. A larger team should raise it and re-read the frontier
+the harness prints; the frontier is reported precisely so this number can be
+argued with rather than accepted."""
+
+frontier_budgets = [2, 5, 10, 20, 50]
+frontier_basis = """Budgets swept for the sensitivity table. The HEADLINE uses
+`alerts_per_day_budget` only. The rest of the frontier is reported so the
+trade-off is visible - it is NOT a menu to pick the flattering row from after
+seeing test results."""

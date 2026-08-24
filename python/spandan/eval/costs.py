@@ -40,6 +40,8 @@ class CostModel:
     only_charge_if_approved: bool
     assumed_review_paise: int
     target_prevalence: float
+    alerts_per_day_budget: float
+    frontier_budgets: tuple[float, ...]
 
     @classmethod
     def load(cls, path: Path | str = COSTS_PATH) -> "CostModel":
@@ -53,6 +55,8 @@ class CostModel:
             only_charge_if_approved=raw["blocked_good"]["only_charge_if_would_have_been_approved"],
             assumed_review_paise=raw["review"]["assumed_cost_paise_per_alert"],
             target_prevalence=raw["prevalence"]["target_rate"],
+            alerts_per_day_budget=raw["operations"]["alerts_per_day_budget"],
+            frontier_budgets=tuple(raw["operations"]["frontier_budgets"]),
         )
 
 

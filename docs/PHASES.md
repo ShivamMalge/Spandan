@@ -6,6 +6,16 @@ criterion below is a command whose output goes in the review, not a claim.
 **Approved Aug 24 with six edits; edits applied, provenance recorded at the foot of
 this file.**
 
+**Availability: closed.** No weekday/weekend asymmetry, capacity is not the binding
+constraint on this build (answered Aug 24). Phase 3 stays on Fri 28 – Sun 30 Aug.
+Full reasoning near the foot of this file; recorded here because it was asked
+three times and the answer was buried.
+
+**Detector freeze: in force from the Phase 2 gate through Phase 3.** No changes to
+`detect/reference.py`, to the feature set, or to window sizes. Phase 3 tests the
+Rust core for numerical parity against the reference, so the reference is the
+parity spec and moving it moves the spec.
+
 Total estimated work: **10.0 days** across **11 calendar days** (Aug 24 – Sep 3).
 That leaves ~1.0 day of true slack. It is thin. The cut list at the end of this
 file, not the schedule, is the real slack — read it as part of the plan, not as an
@@ -57,7 +67,7 @@ this machine before a single line of real Rust is written.
 - `Makefile` with all targets declared: `setup`, `data`, `eval`, `bench`, `test`,
   `demo`, `all`. Targets for phases not yet built print
   `not implemented until phase N` and exit non-zero.
-- `agents.md` committed. `BUILD_LOG.md` created with a header and no entries.
+- `agents.md` committed. `docs/BUILD_LOG.md` created with a header and no entries.
   `README.md` placeholder — one line, no claims.
 - `.gitignore` — ignores generated stream data only, scoped as `/data/` (leading
   slash, root-anchored). It must **not** match `tests/fixtures/`, which holds the
@@ -195,6 +205,11 @@ NumPy baseline.
   their own rupee lines. They are different failure modes with different
   operational responses — a merchant event versus an issuer event — and averaging
   them hides which one the detector is bad at.
+- **Constrained threshold selection.** The operating point maximises net rupees
+  *subject to* an alerts/day budget, not net rupees outright — the unconstrained
+  criterion selects using a cost model that prices a wrongly-blocked declining
+  transaction at almost nothing. The budget is an assumption in `costs.toml` and
+  the whole frontier is reported as sensitivity, fixed before test is read.
 - **Cost-vs-threshold sweep** (replaces the calibration curve, which is dropped on
   merit: the score is a deviation from a per-entity baseline, not a probability
   estimate, so calibration answers a question nobody asked). Net rupee position
@@ -310,6 +325,12 @@ else.
 
 **Goal.** The five modules in scalar Rust, with property tests and numerical parity
 to the Phase 2 reference.
+
+**The reference detector is FROZEN for the duration of this phase.** No changes
+to `detect/reference.py`, the feature set, or window sizes. The Rust core is
+tested for numerical parity against the reference, so the reference is the spec;
+moving it during the port invalidates the comparison. Known-desirable changes —
+notably the long-horizon BIN window in `docs/FAILURE_MODES.md` §7 — wait.
 
 **In scope.**
 - `spandan-core/src/` — exactly five modules: `ingest`, `state`, `velocity`,
@@ -469,7 +490,7 @@ walk the architecture in five minutes.
 how to run, headline metrics **including the FP cost in rupees**, and limitations.
 Architecture diagram checked in as SVG or ASCII in `docs/`.
 `docs/FAILURE_MODES.md` finalized against final numbers. Final ablation table.
-`BUILD_LOG.md` review pass. `make all` from a clean clone. Pitch-video checklist.
+`docs/BUILD_LOG.md` review pass. `make all` from a clean clone. Pitch-video checklist.
 Name availability on PyPI and crates.io checked and the result recorded.
 
 **Explicitly out of scope.** The Razorpay `payment.dispute.created` webhook stub —
@@ -486,7 +507,7 @@ make setup && make all                              # full output; numbers match
 pytest -q && cargo test
 git status --porcelain ; echo "porcelain exit=$? (output must be EMPTY)"
 ls docs/            # diagram + FAILURE_MODES.md + BENCH.md
-grep -c '^## ' BUILD_LOG.md                 # >= 4 entries
+grep -c '^## ' docs/BUILD_LOG.md                 # >= 4 entries
 ```
 
 Two criteria here are doing specific work and must not be softened:
@@ -704,6 +725,36 @@ constraint on this build. Consequences:
   at all.
 - The binding constraint is therefore the calendar and the review cycle, not hours
   available. That makes the cut list, not the clock, the thing to watch.
+
+## Fifth review pass — Aug 24, after the Phase 2 addendum
+
+Six follow-ups, all applied. The detector is frozen after this point.
+
+1. **Precision at a realistic base rate now leads the report** — 0.0956, roughly
+   nine false alarms per true catch. It was mid-table under "observed vs target",
+   which is where a panel finds it in ten seconds and asks why it was not the
+   headline.
+2. **Threshold selection is now constrained**: maximise net rupees *subject to*
+   an alerts/day cap (10/day, stated in `costs.toml [operations]`). The
+   unconstrained criterion was choosing the operating point with a cost model the
+   same document shows prices false positives at almost nothing — so it bought
+   recall with them. `make eval` prints the full budget frontier as a sensitivity
+   table, explicitly not a menu. Threshold 21.15 → 23.05, precision at target
+   0.0693 → 0.0956, break-even ₹204 → ₹985.
+3. **Time-to-detection re-measured at the constrained point** — median 2–4 events
+   and ₹65–95 exposed, replacing the median-0-events figure, which was an artifact
+   of over-triggering rather than a result. The report now says so where the
+   number appears.
+4. **The §3 retraction is kept verbatim** and marked a pitch-video candidate.
+5. **Negative headroom is written as a result**: it identifies a specific,
+   nameable blind spot — legitimate traffic whose declines concentrate on one BIN
+   at one merchant — rather than reading as an apology.
+6. **The long-horizon BIN window is recorded as diagnosed-but-not-attempted** in
+   FAILURE_MODES §7, with the timing reasoning. Declined for Phase 3 because it
+   would move the parity spec on day 8 of 11 with the one-day parity stop already
+   load-bearing.
+
+Also: `docs/` is now canonical for PHASES, RESEARCH, spandan-brief and BUILD_LOG.
 
 ## Fourth review pass — Aug 24, after Phase 2
 

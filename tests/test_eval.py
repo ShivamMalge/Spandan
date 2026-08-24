@@ -515,3 +515,82 @@ def test_every_negative_control_appears_in_the_false_positive_table():
 
     missing = [name for name in NEGATIVE_CONTROLS if name not in CONTROL_AXES]
     assert not missing, f"negative controls missing from the FP cost table: {missing}"
+
+
+# --- the constrained operating point -----------------------------------------
+
+
+def test_threshold_selection_respects_the_alert_budget():
+    """The fix for selecting an operating point with a cost model shown to be wrong.
+
+    Unconstrained "max net rupees" bought recall with false positives, because
+    the model prices a wrongly-blocked declining transaction at almost nothing.
+    The budget is the constraint that does not require trusting the model to
+    price false positives correctly.
+    """
+    rows = [
+        {"threshold": 10.0, "net_paise": 900_000, "alerts_per_day": 40.0},
+        {"threshold": 20.0, "net_paise": 500_000, "alerts_per_day": 8.0},
+        {"threshold": 30.0, "net_paise": 100_000, "alerts_per_day": 1.0},
+    ]
+    unconstrained = select_threshold(rows)
+    assert unconstrained["threshold"] == 10.0, "unconstrained should take the richest row"
+
+    constrained = select_threshold(rows, alerts_per_day_budget=10.0)
+    assert constrained["threshold"] == 20.0, "the 40/day row must be excluded by the cap"
+    assert constrained["alerts_per_day"] <= 10.0
+
+
+def test_budget_tie_break_still_favours_recall():
+    """Two economically equivalent points inside the budget: take the lower threshold."""
+    rows = [
+        {"threshold": 20.0, "net_paise": 1_000_000, "alerts_per_day": 9.0},
+        {"threshold": 25.0, "net_paise": 1_020_000, "alerts_per_day": 8.0},
+    ]
+    chosen = select_threshold(rows, alerts_per_day_budget=10.0)
+    assert chosen["threshold"] == 20.0
+
+
+def test_infeasible_budget_is_flagged_not_silently_ignored():
+    rows = [
+        {"threshold": 10.0, "net_paise": 900_000, "alerts_per_day": 40.0},
+        {"threshold": 20.0, "net_paise": 500_000, "alerts_per_day": 30.0},
+    ]
+    chosen = select_threshold(rows, alerts_per_day_budget=1.0)
+    assert chosen.get("budget_infeasible") is True
+    assert chosen["alerts_per_day"] == 30.0, "the quietest available point is taken"
+
+
+def test_frontier_covers_every_configured_budget(built):
+    """The frontier is a sensitivity table and must be complete.
+
+    If it silently dropped budgets, the reader could not tell which assumptions
+    had been explored.
+    """
+    from spandan.eval.harness import run_budget_frontier
+
+    model = CostModel.load()
+    rows = run_budget_frontier(
+        built["split"], DetectorConfig(), model, built["manifest"]["episode_windows"]
+    )
+    assert [row["budget"] for row in rows] == list(model.frontier_budgets)
+    assert model.alerts_per_day_budget in model.frontier_budgets, (
+        "the headline budget must appear in the frontier so it can be located"
+    )
+    for row in rows:
+        for key in ("precision", "precision_at_target", "recall", "median_ttd_events", "net_rupees"):
+            assert key in row
+
+
+def test_tighter_budgets_never_produce_lower_thresholds(built):
+    """A monotonicity property: a stricter alert cap cannot loosen the operating point."""
+    from spandan.eval.harness import run_budget_frontier
+
+    rows = run_budget_frontier(
+        built["split"], DetectorConfig(), CostModel.load(), built["manifest"]["episode_windows"]
+    )
+    by_budget = sorted(rows, key=lambda r: r["budget"])
+    thresholds = [r["threshold"] for r in by_budget]
+    assert thresholds == sorted(thresholds, reverse=True), (
+        f"thresholds should fall as the budget loosens, got {thresholds}"
+    )

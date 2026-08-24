@@ -255,3 +255,58 @@ def test_no_card_novelty_state_is_retained():
         ReferenceDetector(config).score_batch(base),
         ReferenceDetector(config).score_batch(renamed),
     )
+
+
+# --- the freeze --------------------------------------------------------------
+
+
+def test_detector_configuration_is_frozen_for_phase_3():
+    """The reference is the Rust port's parity spec, so it must not move.
+
+    Phase 3 tests the Rust core for numerical parity against this detector. If the
+    reference's windows or feature weights change during the port, the comparison
+    stops meaning anything and the parity fixture silently becomes wrong.
+
+    These are the values the Rust core will be built against. Changing one is a
+    deliberate act that should fail here first and be re-approved, not a quiet
+    edit. See docs/PHASES.md, Phase 3, and docs/FAILURE_MODES.md 7 for the
+    long-horizon BIN window that was diagnosed and deliberately NOT built.
+    """
+    config = DetectorConfig()
+
+    assert config.window_ms == 300_000
+    assert config.ring_capacity == 512
+    assert config.baseline_sample_interval_ms == 60_000
+    assert config.baseline_min_samples == 20
+    assert config.ewma_halflife_samples == 30.0
+
+    assert config.w_velocity_bin == 1.0
+    assert config.w_decline_bin == 2.0
+    assert config.w_amount == 1.0
+    assert config.w_velocity_ip == 0.5
+    assert config.w_repetition_damping == 1.2
+    assert config.w_merchant_span_damping == 1.4
+
+
+def test_the_scoring_terms_are_frozen():
+    """The set of evidence and damping terms is part of the parity spec too."""
+    from spandan.gen.build import build
+    from helpers import SMALL_CONFIG
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        build(SMALL_CONFIG, tmp)
+        events = read_stream(f"{tmp}/{TEST_FILENAME}")
+
+    detector = ReferenceDetector(DetectorConfig(threshold=-1e18))
+    flag = detector.update(events[0])
+    assert flag is not None
+    terms = {name for name, _ in flag.contributions}
+    assert terms == {
+        "velocity_bin",
+        "decline_bin",
+        "amount",
+        "velocity_ip",
+        "repetition",
+        "merchant_span",
+    }, f"the scoring terms changed: {sorted(terms)}"

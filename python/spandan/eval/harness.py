@@ -131,6 +131,8 @@ def sweep_thresholds(
     pre = metrics.SweepPrecompute(candidates, candidate_scores)
     labels = np.array([e.label for e in events])
 
+    span_days = max((max(e.ts for e in events) - min(e.ts for e in events)) / 86_400_000.0, 1e-9)
+
     rows = []
     for threshold in grid:
         alerts = metrics.alert_count_at(pre, threshold)
@@ -142,6 +144,7 @@ def sweep_thresholds(
                 "gross_paise": gross,
                 "net_paise": gross - alerts * model.assumed_review_paise,
                 "alerts": alerts,
+                "alerts_per_day": alerts / span_days,
                 "precision": confusion.precision,
                 "recall": confusion.recall,
                 "break_even_paise": (gross / alerts) if alerts else 0.0,
@@ -155,28 +158,45 @@ def sweep_thresholds(
 NET_EQUIVALENCE_BAND = 0.05
 
 
-def select_threshold(rows: list[dict]) -> dict:
-    """Maximum net rupee position, with ties broken toward recall.
+def select_threshold(rows: list[dict], alerts_per_day_budget: float | None = None) -> dict:
+    """Maximum net rupees **subject to an alert budget**.
 
-    Chosen on rupees rather than F1, because the project's stated bar is a
-    false-positive cost in rupees. If that produces poor recall, that is the
-    finding and it gets reported.
+    Why constrained rather than plain argmax, which is what Phase 2 did:
 
-    The tie-break exists because the net curve is bumpy — alert counts move in
-    steps, so neighbouring thresholds can differ by a few percent for reasons
-    that are noise rather than signal. Taking the raw argmax would chase those
-    steps. Among operating points within `NET_EQUIVALENCE_BAND` of the best, the
-    lowest threshold wins: if two points make the merchant the same money, the
-    one that catches more attacks is the better product.
+    The unconstrained criterion selects the operating point that maximises net
+    rupees under the cost model. But the Phase 2 addendum demonstrated that the
+    cost model prices 10,759 wrongly-blocked legitimate transactions at Rs 13,121,
+    because that traffic carries low-value baskets and was mostly declining
+    anyway. A model that cheap about false positives will happily buy recall with
+    them - and it did, landing on threshold 21.15, 27.6 alerts/day, and precision
+    0.069 at a realistic base rate.
 
-    This is a selection rule, not a tuned parameter, and it runs on the
-    validation window like everything else.
+    So the operating point was being chosen by an objective already shown to be
+    wrong about the thing it was trading away. The constraint is the fix that does
+    not require trusting the rupee model to price false positives correctly: cap
+    the alert queue at what a human can actually work through, then maximise net
+    inside that cap.
+
+    The cap is an assumption (`costs.toml [operations]`), and the harness reports
+    the whole frontier so the assumption can be argued with.
+
+    Ties within `NET_EQUIVALENCE_BAND` still break toward recall: if two points
+    make the merchant the same money and both fit the budget, the one that catches
+    more attacks is the better product.
     """
-    best = max(row["net_paise"] for row in rows)
+    feasible = rows
+    if alerts_per_day_budget is not None:
+        feasible = [row for row in rows if row["alerts_per_day"] <= alerts_per_day_budget]
+        if not feasible:
+            # No operating point fits the budget. Take the quietest one available
+            # and let the report say so, rather than silently ignoring the cap.
+            return min(rows, key=lambda row: row["alerts_per_day"]) | {"budget_infeasible": True}
+
+    best = max(row["net_paise"] for row in feasible)
     if best <= 0:
-        return max(rows, key=lambda row: row["net_paise"])
+        return max(feasible, key=lambda row: row["net_paise"])
     floor = best * (1.0 - NET_EQUIVALENCE_BAND)
-    equivalent = [row for row in rows if row["net_paise"] >= floor]
+    equivalent = [row for row in feasible if row["net_paise"] >= floor]
     return min(equivalent, key=lambda row: row["threshold"])
 
 
@@ -188,10 +208,12 @@ def evaluate(
     config: DetectorConfig,
     model: CostModel,
     episode_windows: list[dict],
+    alerts_per_day_budget: float | None = None,
 ) -> dict:
     validation_scores, test_scores = score_split_once(split, config)
     sweep = sweep_thresholds(split.validation, validation_scores, model)
-    chosen = select_threshold(sweep)
+    budget = model.alerts_per_day_budget if alerts_per_day_budget is None else alerts_per_day_budget
+    chosen = select_threshold(sweep, budget)
     threshold = chosen["threshold"]
 
     labels = np.array([e.label for e in split.test])
@@ -216,7 +238,10 @@ def evaluate(
         )[1],
     }
 
+    true_alerts = sum(1 for a in alert_list if a["is_true"])
     return {
+        "alert_precision": true_alerts / len(alert_list) if alert_list else 0.0,
+        "true_alerts": true_alerts,
         "margin": margin,
         "threshold": threshold,
         "threshold_source": {
@@ -224,7 +249,13 @@ def evaluate(
             "start_ms": split.validation_start_ms,
             "end_ms": max(e.ts for e in split.validation),
             "events": len(split.validation),
-            "criterion": "max net rupee position on the sweep",
+            "criterion": (
+                f"max net rupees subject to alerts/day <= {budget:g}"
+                if budget is not None
+                else "max net rupees, unconstrained"
+            ),
+            "alerts_per_day_budget": budget,
+            "budget_infeasible": chosen.get("budget_infeasible", False),
         },
         "confusion": confusion,
         "average_precision": average_precision_of(test_scores, labels),
@@ -244,6 +275,94 @@ def evaluate(
 
 def average_precision_of(scores: np.ndarray, labels: np.ndarray) -> float:
     return metrics.average_precision(scores, labels)
+
+
+def run_budget_frontier(
+    split: Split,
+    config: DetectorConfig,
+    model: CostModel,
+    episode_windows: list[dict],
+) -> list[dict]:
+    """The operating-point frontier: what each alert budget buys.
+
+    One threshold selection per budget, each made on the validation window, then
+    evaluated on test. Scoring happens once and is reused across budgets, so this
+    costs almost nothing beyond the sweep.
+
+    **This is a sensitivity table, not a menu.** The headline operating point is
+    the budget stated in `costs.toml`, fixed before test was read. Reporting the
+    frontier lets a reader disagree with that assumption; picking the flattering
+    row after seeing these numbers would be selecting on the test set, which is
+    the thing this project exists not to do.
+    """
+    validation_scores, test_scores = score_split_once(split, config)
+    sweep = sweep_thresholds(split.validation, validation_scores, model)
+    labels = np.array([e.label for e in split.test])
+
+    rows = []
+    for budget in model.frontier_budgets:
+        chosen = select_threshold(sweep, budget)
+        threshold = chosen["threshold"]
+        confusion = metrics.confusion_at(test_scores, labels, threshold)
+        alert_list = metrics.alerts(split.test, test_scores, threshold)
+        breakdown = compute_costs(split.test, test_scores, threshold, model, len(alert_list))
+        reweighted = reweight_to_prevalence(
+            confusion.tp, confusion.fp, confusion.fn, confusion.tn, model.target_prevalence
+        )
+        ttd = metrics.time_to_detection(split.test, test_scores, threshold, episode_windows)
+        episodes = sum(row["episodes"] for row in ttd.values())
+        caught = sum(row["episodes"] - row["missed"] for row in ttd.values())
+        medians = [
+            row["median_events"] for row in ttd.values() if not math.isinf(row["median_events"])
+        ]
+        rows.append(
+            {
+                "budget": budget,
+                "threshold": threshold,
+                "alerts_per_day": metrics.alerts_per_day(split.test, alert_list),
+                "precision": confusion.precision,
+                "precision_at_target": reweighted.precision_target,
+                "recall": confusion.recall,
+                "episodes_caught": caught,
+                "episodes": episodes,
+                "median_ttd_events": float(np.median(medians)) if medians else math.inf,
+                "net_rupees": breakdown.net_paise(model.assumed_review_paise) / 100.0,
+                "infeasible": chosen.get("budget_infeasible", False),
+            }
+        )
+    return rows
+
+
+def render_frontier(rows: list[dict], model: CostModel) -> None:
+    print()
+    print("=" * 78)
+    print("OPERATING-POINT FRONTIER -- what each alert budget buys")
+    print("=" * 78)
+    print("The threshold is chosen to maximise net rupees SUBJECT TO an alerts/day cap,")
+    print("not to maximise net rupees outright. The unconstrained criterion was selecting")
+    print("the operating point using a cost model that prices a wrongly-blocked declining")
+    print("transaction at almost nothing - so it bought recall with false positives.")
+    print()
+    print(f"{'budget':>8}{'thresh':>9}{'alerts/d':>10}{'prec':>8}{'prec@0.15%':>12}"
+          f"{'recall':>8}{'episodes':>10}{'med TTD':>9}{'net':>12}")
+    for row in rows:
+        marker = " <== HEADLINE" if row["budget"] == model.alerts_per_day_budget else ""
+        ttd = row["median_ttd_events"]
+        caught_cell = f"{row['episodes_caught']}/{row['episodes']}"
+        print(
+            f"{row['budget']:>8.0f}{row['threshold']:>9.2f}{row['alerts_per_day']:>10.1f}"
+            f"{row['precision']:>8.3f}{row['precision_at_target']:>12.4f}"
+            f"{row['recall']:>8.3f}"
+            f"{caught_cell:>10}"
+            f"{('never' if math.isinf(ttd) else f'{ttd:.0f}'):>9}"
+            f"{R + format(row['net_rupees'], ',.0f'):>12}{marker}"
+        )
+    print()
+    print("`prec@0.15%` is precision reweighted to a realistic merchant card-testing")
+    print("base rate. It is the number an operations team would actually live with.")
+    print("This table is a SENSITIVITY analysis. The headline budget was fixed in")
+    print("costs.toml before the test window was read; choosing a row from here after")
+    print("seeing these numbers would be selecting on the test set.")
 
 
 def _bar(value: float, peak: float, width: int = 26) -> str:
@@ -268,18 +387,52 @@ def render(result: dict, model: CostModel, split: Split) -> None:
         f"[{source['start_ms']}, {source['end_ms']}], {source['events']} events"
     )
     print(f"criterion: {source['criterion']}")
+    if source.get("budget_infeasible"):
+        print("WARNING: no operating point met the alert budget; the quietest was taken.")
     print(f"threshold: {threshold:.4f}")
     print("the test window was not read until this value was fixed.")
 
+    reweighted_lead = result["reweighted"]
     print()
     print("=" * 78)
-    print("DETECTION SPEED  -- the number closest to the product")
+    print("HEADLINE  -- precision at a realistic base rate")
+    print("=" * 78)
+    print(
+        f"precision at the assumed {reweighted_lead.target_prevalence:.2%} merchant "
+        f"card-testing rate:   {reweighted_lead.precision_target:.4f}"
+    )
+    if reweighted_lead.precision_target > 0:
+        per_catch = (1 - reweighted_lead.precision_target) / reweighted_lead.precision_target
+        print(f"that is roughly {per_catch:.0f} false alarms for every true catch.")
+    print()
+    print("This is the number a payments panel will look for, so it is the number this")
+    print("report opens with.")
+    print()
+    print(f"Measured at the generator's own ~1.3% positive rate, precision is "
+          f"{reweighted_lead.precision_observed:.4f}.")
+    print("That figure flatters the detector by roughly an order of magnitude: real")
+    print("merchant card-testing rates are far below the rate this stream was built at.")
+    print("Recall is unaffected by base rate and is reported below unadjusted.")
+    print()
+    print(f"prevalence assumed: {reweighted_lead.target_prevalence:.2%}  (ASSUMPTION, costs.toml)")
+    print(f"negatives rescaled x{reweighted_lead.negative_scale:,.1f} -> effective FP "
+          f"{reweighted_lead.effective_fp:,.0f}")
+
+    print()
+    print("=" * 78)
+    print("DETECTION SPEED")
     print("=" * 78)
     print("A spike detector is judged on how fast it catches an episode, not only on")
     print("whether it eventually does. Attempt 40 and attempt 400 are both recall=1 and")
     print("are not the same outcome for the merchant. An episode has to be caught ONCE")
     print("to be acted on, so episode detection and event recall measure different")
     print("things and both are reported.")
+    print()
+    print("Read this against the alert budget above, not on its own. A median of 0 events")
+    print("means episodes are caught on their first event - which a low enough threshold")
+    print("will always achieve, by flagging almost everything. Fast detection bought by")
+    print("over-triggering is not a result; these figures are measured at the CONSTRAINED")
+    print("operating point so that they cost something.")
     print()
     print(f"{'scenario':<14}{'episodes':>9}{'caught':>9}{'med events':>12}{'p90 events':>12}{'med rupees':>13}")
     for name in ATTACK_SCENARIOS:
@@ -330,10 +483,16 @@ def render(result: dict, model: CostModel, split: Split) -> None:
     )
     if margin["headroom"] < 0:
         print()
-        print("HEADROOM IS NEGATIVE. The threshold sits BELOW the highest-scoring clean")
-        print(f"event, so `{margin['highest_clean_scenario']}` is not being rejected at all -")
-        print("it is being scored like an attack and separated only by where the line")
-        print("happens to fall. This is a measured failure of the detector, not a margin.")
+        print("NEGATIVE HEADROOM -- this is a result, and it is the sharpest one here.")
+        print(f"The highest-scoring clean event ({margin['highest_clean_scenario']}) scores")
+        print("ABOVE the threshold, so the two populations are not separated by the")
+        print("detector at all - only by where the line happens to fall.")
+        print()
+        print("What that identifies: the detector has a blind spot on legitimate traffic")
+        print("whose declines are concentrated on a single BIN at a single merchant. It")
+        print("cannot tell that from card testing, because the feature that would - the")
+        print("same card retried - is invisible at a 5-minute window. The control was")
+        print("built to find exactly this, and it found it. See docs/FAILURE_MODES.md 2.")
     elif margin["headroom_pct"] < 0.25:
         print("that is a narrow separation. Read the multi-seed spread below before")
         print("treating this precision as stable - one unlucky stream closes this gap.")
@@ -408,6 +567,13 @@ def render(result: dict, model: CostModel, split: Split) -> None:
     breakeven = costs.break_even_review_paise()
     print(f"{'alerts a human must review':<34}{costs.alerts:>16}")
     print(f"{'alerts per day':<34}{result['alerts_per_day']:>16.1f}")
+    print(
+        f"{'of those, genuinely card testing':<34}"
+        f"{result['true_alerts']:>16}   ({result['alert_precision']:.1%})"
+    )
+    print("  alert-level precision is what an analyst actually experiences: of the")
+    print("  things they open, how many are real. It is not the same as event-level")
+    print("  precision and is the more operationally honest of the two.")
     print()
     print("BREAK-EVEN REVIEW COST -- the defensible figure, because it is an output:")
     if math.isinf(breakeven):
@@ -567,6 +733,7 @@ def main(argv: list[str] | None = None) -> int:
 
     result = evaluate(split, config, model, episode_windows)
     render(result, model, split)
+    render_frontier(run_budget_frontier(split, config, model, episode_windows), model)
     render_sweep(result, model)
 
     rows = run_seed_matrix(args.seeds, manifest["seed"], config, model)
