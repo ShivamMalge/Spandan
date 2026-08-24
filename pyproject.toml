@@ -1,0 +1,27 @@
+[build-system]
+requires = ["maturin>=1.14,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "spandan"
+version = "0.1.0"
+description = "Defense-only streaming fraud-spike detector for card-testing and velocity abuse."
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.maturin]
+manifest-path = "spandan-core/Cargo.toml"
+python-source = "python"
+module-name = "spandan_core._native"
+features = ["pyo3/extension-module"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

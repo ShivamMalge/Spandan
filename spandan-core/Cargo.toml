@@ -1,0 +1,19 @@
+[package]
+name = "spandan-core"
+version = "0.1.0"
+edition = "2021"
+description = "Deterministic streaming detector core for card-testing and velocity abuse. Defense-only."
+license = "MIT"
+publish = false
+
+[lib]
+name = "spandan_core"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# abi3-py310: one forward-compatible wheel for Python 3.10+.
+pyo3 = { version = "0.28", features = ["abi3-py310", "extension-module"] }
+
+# No other dependencies. Phase 3 requests `proptest` as a dev-dependency and
+# nothing else; SIMD crates, custom hash maps, custom allocators, and rayon are
+# cut by decision (agents.md section 8, PHASES.md Phase 3).
