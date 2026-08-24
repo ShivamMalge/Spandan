@@ -62,8 +62,8 @@ class GenConfig:
     seed: int = 20_260_824
 
     # --- span and split ---------------------------------------------------
-    total_days: int = 14
-    train_days: int = 10
+    total_days: int = 100
+    train_days: int = 50
     """Train is [0, train_days); test is [train_days, total_days). Strictly
     temporal, and the boundary is a wall: no event straddles it."""
 
@@ -132,64 +132,25 @@ class GenConfig:
 
 # --- the injected episodes -------------------------------------------------
 #
-# Placed in both the train and the test window on purpose. Phase 2 selects its
-# threshold on a validation window carved out of the training period, which is
-# only possible if the training period contains positives.
+# Built by `schedule.build_schedule` rather than written out by hand: Phase 2
+# review required 20+ episodes per scenario per split, which is 240 episodes.
 #
-# Signatures only. Rate, entity concentration, amount band, decline ratio.
+# The span grew from 14 days to 100 (train 50 / test 50) rather than the episodes
+# being packed more densely into the old span. That distinction is the whole
+# point - see schedule.py. Nothing about any individual episode's signature
+# changed, so the scenarios are exactly as hard as they were; there are simply
+# enough of them to say something.
 
-_EPISODES: tuple[ScenarioEpisodeSpec, ...] = (
-    # -- concentrated burst: one BIN, one IP, one device, low amounts, high
-    #    decline ratio, compressed into minutes.
-    ScenarioEpisodeSpec("burst", 1.30, 12.0, 240, 240, 1, 1, 0.86, 100, 5_000, 2),
-    ScenarioEpisodeSpec("burst", 4.72, 9.0, 190, 190, 1, 1, 0.89, 100, 4_000, 5),
-    ScenarioEpisodeSpec("burst", 7.15, 15.0, 300, 300, 1, 1, 0.83, 200, 6_000, 0),
-    ScenarioEpisodeSpec("burst", 9.05, 11.0, 210, 210, 1, 1, 0.87, 100, 5_000, 7),
-    ScenarioEpisodeSpec("burst", 10.60, 13.0, 265, 265, 1, 1, 0.85, 100, 5_000, 3),
-    ScenarioEpisodeSpec("burst", 12.85, 10.0, 205, 205, 1, 1, 0.88, 200, 4_500, 6),
-    # -- rotating: the same concentration on the card and BIN axes, but the IP
-    #    and device axes are spread wide enough that a per-IP velocity rule sees
-    #    nothing unusual on any single address.
-    ScenarioEpisodeSpec("rotating", 2.45, 26.0, 250, 250, 62, 58, 0.84, 100, 5_000, 1),
-    ScenarioEpisodeSpec("rotating", 5.90, 31.0, 285, 285, 74, 70, 0.81, 100, 6_000, 4),
-    ScenarioEpisodeSpec("rotating", 8.35, 22.0, 205, 205, 55, 51, 0.86, 200, 4_000, 8),
-    ScenarioEpisodeSpec("rotating", 11.40, 28.0, 240, 240, 66, 63, 0.83, 100, 5_500, 2),
-    ScenarioEpisodeSpec("rotating", 13.10, 24.0, 220, 220, 58, 55, 0.85, 100, 5_000, 9),
-    # -- slow and low: the same entity concentration stretched over hours, at a
-    #    rate that stays underneath any fixed per-window count threshold. This is
-    #    the scenario expected to be hardest, and it is in the plan precisely so
-    #    that difficulty is measured rather than assumed.
-    ScenarioEpisodeSpec("slow_low", 3.10, 330.0, 54, 54, 3, 3, 0.72, 100, 3_000, 3),
-    ScenarioEpisodeSpec("slow_low", 6.55, 400.0, 62, 62, 4, 4, 0.69, 100, 3_500, 6),
-    ScenarioEpisodeSpec("slow_low", 9.60, 365.0, 48, 48, 2, 2, 0.75, 200, 3_000, 1),
-    ScenarioEpisodeSpec("slow_low", 11.85, 420.0, 66, 66, 5, 4, 0.70, 100, 4_000, 8),
-    ScenarioEpisodeSpec("slow_low", 13.55, 380.0, 52, 52, 3, 3, 0.73, 100, 3_200, 5),
-    # -- benign flash sale: labeled CLEAN. A real volume surge from real
-    #    customers — many distinct cards, many distinct IPs and devices, ordinary
-    #    amounts, and a mildly elevated decline ratio from gateway strain. It is
-    #    shaped like an attack on every volume feature and must not be flagged.
-    ScenarioEpisodeSpec("flash_sale", 2.80, 55.0, 900, 880, 840, 810, 0.16, 20_000, 900_000, 4),
-    ScenarioEpisodeSpec("flash_sale", 8.70, 45.0, 760, 745, 705, 690, 0.15, 25_000, 750_000, 7),
-    ScenarioEpisodeSpec("flash_sale", 11.20, 60.0, 1_020, 995, 950, 920, 0.17, 15_000, 850_000, 0),
-    ScenarioEpisodeSpec("flash_sale", 12.40, 50.0, 820, 800, 765, 740, 0.14, 20_000, 800_000, 9),
-    # -- issuer outage: labeled CLEAN, and the harder of the two negative
-    #    controls. Entirely legitimate traffic on ONE BIN, declining at
-    #    card-testing rates because the issuer is down. That is the detector's
-    #    primary signal — elevated decline ratio concentrated on a BIN — produced
-    #    with no attacker present.
-    #
-    #    What separates it from a burst, and what the detector has to find:
-    #      * volume is elevated by *retries*, so distinct cards are far fewer
-    #        than events (customers retry; a tester does not retry a dead card)
-    #      * amounts are ordinary basket sizes, not a tight low probe band
-    #      * the cards are known customers with existing baselines
-    #      * it spans several merchants at once, because an issuer's customers
-    #        shop in more than one place
-    ScenarioEpisodeSpec("issuer_outage", 1.90, 62.0, 880, 290, 275, 265, 0.83, 1_000, 5_000_00, 0, 4),
-    ScenarioEpisodeSpec("issuer_outage", 5.30, 78.0, 1_050, 340, 320, 310, 0.79, 1_000, 5_000_00, 3, 5),
-    ScenarioEpisodeSpec("issuer_outage", 8.95, 55.0, 760, 250, 240, 230, 0.86, 1_000, 5_000_00, 5, 4),
-    ScenarioEpisodeSpec("issuer_outage", 11.70, 70.0, 960, 315, 300, 290, 0.81, 1_000, 5_000_00, 2, 5),
-    ScenarioEpisodeSpec("issuer_outage", 13.30, 58.0, 800, 265, 250, 245, 0.84, 1_000, 5_000_00, 6, 4),
-)
 
-DEFAULT_CONFIG = GenConfig(episodes=_EPISODES)
+def default_config(seed: int = 20_260_824, total_days: int = 100, train_days: int = 50) -> GenConfig:
+    from .schedule import build_schedule
+
+    return GenConfig(
+        seed=seed,
+        total_days=total_days,
+        train_days=train_days,
+        episodes=build_schedule(total_days, train_days, seed),
+    )
+
+
+DEFAULT_CONFIG = default_config()

@@ -1,247 +1,282 @@
 # Failure modes
 
 What Spandan misses, what it over-flags, and where its numbers cannot be trusted.
-Every claim here is backed by a measurement from `make eval` or `spandan replay`,
-not by inspection of the design.
+Every claim is backed by a measurement from `make eval` or `spandan replay`, not
+by inspection of the design.
 
-Draft as of the Phase 2 gate. Numbers are from the shipped stream
-(`config_hash a4d5c839…`, seed 20260824) unless stated. Phase 6 refreshes them
-against the final detector.
+State: end of Phase 2, after the review addendum. Stream is 100 days, 1.61M
+events, 240 episodes (20 per scenario per split), three seeds.
+Phase 6 refreshes these against the final detector.
 
 ---
 
-## 0. The headline finding: the numbers are not stable across streams
+## 0. What the multi-seed check settled, and what it did not
 
-**This is the most important item in this document, and it outranks every metric
-elsewhere in the project.**
-
-Running the identical evaluation on three independently generated streams:
+Nothing in this document should be read from a single stream. Every headline
+below is a median across three independently generated streams, with the range.
 
 | Metric | min | median | max | spread |
 |---|---|---|---|---|
-| precision | 0.6707 | 0.8732 | 1.0000 | **0.3293** |
-| recall | 0.1594 | 0.5191 | 0.5448 | **0.3855** |
-| PR-AUC | 0.6977 | 0.7951 | 0.9239 | 0.2262 |
-| net rupees | ₹1,294 | ₹30,856 | ₹32,631 | ₹31,337 |
-| alerts/day | 1.5 | 2.5 | 3.8 | 2.3 |
+| precision | 0.4003 | **0.4564** | 0.5892 | 0.189 |
+| recall | 0.8234 | **0.8573** | 0.8696 | **0.046** |
+| PR-AUC | 0.6192 | 0.6615 | 0.7928 | 0.174 |
+| net rupees | ₹226,409 | ₹395,017 | ₹408,038 | ₹181,630 |
+| alerts/day | 3.9 | 6.8 | 27.6 | **23.7** |
+| headroom % | −3.016 | −2.820 | −2.416 | 0.599 |
 
-Per seed:
+**Recall is now stable and precision is not.** Recall's spread fell from 0.386 to
+**0.046** when the test window went from 6 attack episodes to 60 — that was the
+underpowered-evaluation problem, and it is fixed. Precision still swings 0.40–0.59
+because it is dominated by false positives on one control (§2.1), whose volume
+varies with the stream.
 
-| seed | threshold | PR-AUC | precision | recall |
-|---|---|---|---|---|
-| 20260824 | 25.90 | 0.9239 | 1.0000 | 0.5448 |
-| 20260825 | 39.09 | 0.6977 | 0.6707 | 0.1594 |
-| 20260826 | 26.02 | 0.7951 | 0.8732 | 0.5191 |
-
-**Quoting "precision 1.00, recall 0.54" as the result would be reporting noise.**
-The defensible statement is the median with the range attached.
-
-There are two distinct causes and they need different fixes:
-
-1. **The test window is underpowered.** It contains six attack episodes — two per
-   scenario. Any per-scenario recall therefore rests on a sample of two, and
-   episode-level variation dominates everything downstream. This is a flaw in the
-   evaluation design, not a property of the detector, and it errs in both
-   directions rather than flattering the result.
-2. **Threshold selection chases a bumpy net curve.** Alert counts move in steps,
-   so the net-versus-threshold curve is not smooth, and the selected threshold
-   moved from 25.90 to 39.09 across streams. PR-AUC is threshold-free and still
-   spreads by 0.23, so the underlying separability varies too — threshold
-   selection compounds a real problem rather than being the whole of it.
-
-Neither has been fixed, because fixing them changes the generator and the
-selection rule, and both are gated decisions. The recommendation is in §7.
+**Alerts/day ranges 3.9 to 27.6.** That is the least stable number in the project
+and the one an operations team would care about most. A detector that might
+generate four alerts a day or might generate twenty-eight is not yet a product.
 
 ---
 
-## 1. What it misses
+## 1. The strongest result: detection speed
 
-### 1.1 Slow-and-low is the weakest scenario, as predicted
-
-| Scenario | episodes caught | event recall | median events before first flag | median rupees exposed |
+| Scenario | episodes caught | median events before first flag | p90 | median rupees exposed |
 |---|---|---|---|---|
-| `burst` | 2/2 | 0.6894 | 2 | ₹39 |
-| `rotating` | 2/2 | 0.5326 | 4 | ₹121 |
-| `slow_low` | **1/2** | **0.0169** | 5 | ₹62 |
+| `burst` | **20/20** | 0 | 13 | ₹0 |
+| `rotating` | **20/20** | 0 | 6 | ₹0 |
+| `slow_low` | **20/20** | 1 | 7 | ₹11 |
 
-At the cost-optimal threshold, `slow_low` catches one episode of two and 1.7% of
-its events. At the more conservative threshold selected before the tie-break rule
-was added, it caught **zero of two**.
+Every episode of every attack scenario is caught, and the median episode is caught
+on its **first or second event**, before any material value has moved.
 
-This is the scenario the plan predicted would be hardest, and it is. The cause is
-structural rather than incidental: the detector's velocity term measures events
-per five-minute window against a per-entity baseline, and an episode spread over
-six hours never produces an unusual five-minute window. It is not a tuning
-failure; a detector with a five-minute window cannot see a six-hour signal.
+This is the number closest to the product. A classifier that eventually labels a
+burst correctly and a detector that catches it on attempt one are both "recall
+high" and are not the same thing to a merchant.
 
-**What would fix it:** a second, much longer window (hours rather than minutes) on
-the BIN axis. That is a design change, not a parameter change, and it is not in
-the Phase 2 scope.
+**`slow_low` is no longer the weak scenario.** At the Phase 2 threshold it caught
+1 of 2 episodes at 1.7% event recall; it now catches 20/20 with a median of one
+event. That change came from the operating point moving (threshold 25.90 → 21.15),
+not from any change to the detector — which is itself a warning about how much the
+Phase 2 per-scenario conclusions depended on where the line fell.
 
-### 1.2 Event recall understates operational performance, and both are reported
-
-Event-level recall is 0.54. Episode-level detection is 5 of 6. These measure
-different things and the difference is not a rounding artifact: an episode has to
-be caught **once** to be acted on, so event recall penalises the detector for not
-flagging every subsequent event of an episode it already caught. Neither number
-replaces the other, and reporting only the flattering one would be dishonest in
-either direction depending on the audience.
-
-### 1.3 Time to detection is the number closest to the product
-
-Median 2 events and ₹39 exposed for `burst`, 4 events and ₹121 for `rotating`.
-Both are well inside the window where a merchant can act. This is the metric most
-likely to matter in production and the one least represented in comparable
-submissions.
+Event-level recall is 0.857. Episode-level detection is 60/60. Both are reported;
+neither replaces the other.
 
 ---
 
 ## 2. What it over-flags
 
-### 2.1 Cold start — the real one, and it was caught by accident
+### 2.1 The single-merchant issuer outage. This is the headline failure.
 
-A detector with no per-entity history over-flags exactly the traffic that most
-resembles an attack. Measured on the first 30,000 test events:
+| Control | axis attacked | events | flagged | rate | blocked-good cost |
+|---|---|---|---|---|---|
+| `flash_sale` | volume | 17,787 | 38 | 0.0021 | ₹644 |
+| `issuer_outage` | decline ratio | 18,057 | 2,066 | 0.1144 | **₹2.30L** |
+| **`outage_single_merchant`** | decline ratio, no crutches | 18,169 | **10,759** | **0.5922** | ₹13,121 |
+| `benign` | — | 740,349 | 1,084 | 0.0015 | ₹46,940 |
+
+**59% of a legitimate single-merchant issuer outage is flagged as card testing.**
+
+**And notice what the rupee column does with that.** The worst failure mode by
+count — 10,759 false positives — costs ₹13,121, while a control flagged five times
+less often costs ₹2.30L. Two reasons, both of which are limitations of the cost
+model rather than mitigations:
+
+1. `outage_single_merchant` carries low-value baskets by construction, so the
+   contribution margin lost per blocked transaction is small.
+2. Most of its traffic was declining anyway, so blocking it costs no margin at
+   all (§6).
+
+A rupee model that scores 10,759 wrongly-blocked legitimate transactions at ₹13k
+is telling you something about the model, not about the detector. **Do not read
+the low cost as evidence that this failure is unimportant.** A merchant whose
+customers are being blocked during an issuer outage does not experience it as a
+₹13,121 event, and none of the reputational cost is represented anywhere in
+`costs.toml`.
+
+The headroom is negative on every seed (−2.4 to −3.0 times the threshold): the
+highest-scoring clean event scores **80.79** against a threshold of **21.15**. The
+control is not being rejected at all. It is being scored like an attack, and the
+only thing separating the two populations is where the line happens to fall.
+
+This was built deliberately, on review instruction, after Phase 2 measured *which*
+separator was doing the work on the multi-merchant outage. The answer was that the
+detector was rejecting it on **merchant span and amount** — not on the retry
+structure the control was designed around. `outage_single_merchant` removes both
+crutches: one merchant, and amounts in the same low band as a probe burst.
+
+What is left is retry structure, and **the detector cannot see it** (§2.2).
+
+Consequences, stated plainly:
+
+- Precision at the observed prevalence is 0.456 median. At the stated realistic
+  0.15% prevalence it falls to **0.069**.
+- A merchant running this detector during an issuer outage would have most of
+  their legitimate declining traffic flagged, at the worst possible moment.
+- This is a real, common, well-understood payments event. It is the first
+  false-positive case a risk panel raises, and the honest answer today is that
+  the detector fails it.
+
+### 2.2 The retry separator is invisible at the window size chosen
+
+The design intent was that retries distinguish an outage from a probe run: an
+outage re-attempts the same card, a probe does not revisit a dead card. Measured
+over a whole episode that holds — roughly 4.7 attempts per card against a burst's
+1.0.
+
+Inside the detector's **5-minute** window it does not hold. An outage's retries are
+spread across a 60-minute episode, so any single window sees mostly distinct cards.
+Working it through: ~70 events drawn from ~290 cards in a 5-minute window yields
+about 63 distinct cards, or 1.13 attempts per card — while a burst packing 240
+events into 12 minutes yields about 1.22 in-window attempts per card. **The
+damping term is not merely weak here; at this window size it points the wrong
+way.**
+
+The `repetition` term is therefore close to dead weight, and possibly harmful.
+Fixing it needs a second, much longer window on the BIN axis — a design change,
+not a parameter change.
+
+### 2.3 Cold start
 
 | | flagged | truly card testing | false positives |
 |---|---|---|---|
-| warmed on 152,035 prior events | 230 | 230 | **0** |
-| `--cold-start` | 29 | 24 | **5** (all `issuer_outage`) |
+| warmed on prior events | 230 | 230 | 0 |
+| `--cold-start` | 29 | 24 | 5 (all `issuer_outage`) |
 
-With cold baselines, a BIN's baseline window count sits near 1.0 with almost no
-variance, so an ordinary issuer-outage window scores 17–21 standard deviations
-above it.
+With empty baselines a BIN's baseline window count sits near 1.0 with almost no
+variance, so ordinary traffic scores 17–21 standard deviations above it. A
+detector deployed against a new merchant, or restarted without persisted state,
+over-flags for its first window of operation.
 
-This surfaced because the replay demo disagreed with `make eval` — the demo was
-starting cold while the eval warmed on the training window. The fix was to warm
-the demo, but the underlying property is real: **a detector deployed against a new
-merchant, or restarted without persisted state, will over-flag for its first
-window of operation.** `spandan replay --cold-start` demonstrates it deliberately.
-See `BUILD_LOG.md`.
+Found because the replay demo disagreed with `make eval` (BUILD_LOG). Demonstrable
+on purpose via `spandan replay --cold-start`. **Mitigation not built:** persist
+per-entity baselines across restarts.
 
-**Mitigation not built:** persist per-entity baselines across restarts, and
-suppress scoring for an entity until `baseline_min_samples` is reached on a
-per-entity rather than global basis.
+### 2.4 Over-flagging the evaluation still cannot see
 
-### 2.2 The negative controls hold, but with almost no headroom
-
-At the selected threshold both controls produce **zero** false positives:
-
-| Control | axis attacked | flagged | blocked-good cost |
-|---|---|---|---|
-| `flash_sale` | volume | 0 | ₹0 |
-| `issuer_outage` | decline ratio | 0 | ₹0 |
-| `benign` | — | 0 | ₹0 |
-
-That `FP = 0` is not a result on its own. The headroom is:
-
-- highest-scoring clean event: **25.06** (a `flash_sale` event)
-- threshold: **25.90**
-- headroom: **0.85, or 3.3% of the threshold**
-
-A 3.3% margin is not a comfortable separation. Read alongside §0: on seed
-20260825 that margin closed and precision fell to 0.67.
-
-### 2.3 The retry separator does not work at the window scale chosen
-
-The issuer-outage control was designed to be distinguishable from a burst partly
-by card retries — 5.36 attempts per card against a burst's 1.58. **That separator
-is largely invisible to the detector**, because the retries are spread across a
-60-minute episode while the damping term measures repetition inside a 5-minute
-window. Within any single window the outage's cards look almost all distinct.
-
-The outage is rejected mainly by the merchant-span term and by amount, not by
-repetition. The repetition term is close to dead weight at the current window
-size, and a fair ablation would probably show it contributing little. It was not
-one of the two ablations run (see §5).
-
-### 2.4 Unmodelled over-flagging the evaluation cannot see
-
-- **Gateway incidents** — the milder, more frequent cousin of a full issuer
-  outage: decline rates up a few points for a few minutes. Not generated, so not
-  measured. A detector tuned against large outages may over-flag small ones.
-- **Shared-IP benign traffic** — corporate NAT, carrier-grade NAT, a household
-  device. The generator draws cards, IPs and devices independently, so no benign
-  entity concentration exists at all, and the per-IP term is never tested against
-  a legitimate reason for it.
-- **Retry storms after a network blip** — benign arrivals are Poisson, so the
-  only benign burst the detector faces is the flash sale.
+- **Gateway incidents** — decline rates up a few points for a few minutes. Not
+  generated, so not measured.
+- **Shared-IP benign traffic** — corporate NAT, carrier-grade NAT, household
+  devices. Cards, IPs and devices are drawn independently, so no benign entity
+  concentration exists and the per-IP term is never tested against a legitimate
+  reason for one.
+- **Retry storms after a network blip.**
 
 ---
 
-## 3. Where the ablations undercut the design
+## 3. The ablations: a Phase 2 claim, retracted
 
-| variant | precision | recall | PR-AUC | net | alerts |
-|---|---|---|---|---|---|
-| full | 1.0000 | 0.5448 | 0.9239 | ₹32,631 | 6 |
-| drop-EWMA | 0.9005 | 0.8635 | 0.9040 | **₹49,790** | 125 |
-| drop-per-IP | 1.0000 | 0.4742 | 0.9286 | ₹28,846 | 4 |
+**Phase 2 reported that dropping the per-entity EWMA baseline improved net
+position by ₹17,159 and concluded the EWMA "is not carrying the detection
+signal". That result was measured on one stream. It does not survive.**
 
-**Removing the per-entity EWMA baseline makes the detector more profitable**, by
-₹17,159 on this stream — it catches far more (recall 0.86 vs 0.54) at modest
-precision cost. Reported as measured, per `agents.md` §6.
+Median across 3 streams, with [min, max]:
 
-The honest reading: the per-entity baseline is not carrying the detection signal.
-What it buys is **alert volume** — 6 alerts versus 125, which is 1.5/day versus
-31/day. Under this cost model, where the assumed review cost is ₹40 and the
-break-even is ₹5,478, that trade is not obviously worth ₹17,159. Under a cost
-model with a realistic analyst capacity constraint it might be.
+| variant | precision | recall | net rupees |
+|---|---|---|---|
+| full | 0.456 [0.40, 0.59] | 0.857 [0.82, 0.87] | 395,017 [226,409, 408,038] |
+| drop-EWMA | 0.356 [0.35, 0.37] | 0.844 [0.77, 0.85] | 364,542 [335,852, 407,998] |
+| drop-per-IP | 0.420 [0.41, 0.73] | 0.873 [0.78, 0.92] | 355,738 [264,975, 411,118] |
 
-This is a genuine argument against part of the architecture, and it is exactly the
-sort of thing a Rust core built around per-entity EWMA/Welford state should have
-to answer. It does not invalidate the Rust work — bounded-memory per-entity state
-is still what the streaming story rests on — but the claim "EWMA carries the
-signal" is not supported and will not be made.
+Paired per seed, which is the only comparison that controls for the stream:
 
-`drop-per-IP` costs 0.07 recall and slightly *improves* PR-AUC, which is
-consistent with the per-IP term helping on `burst` and doing nothing for
-`rotating` by construction.
+| ablation | net delta vs full (median) | range | beats full on | verdict |
+|---|---|---|---|---|
+| drop-EWMA | ₹12,981 | [−₹43,496, +₹109,443] | 2 of 3 seeds | **not consistent** |
+| drop-per-IP | ₹16,101 | [−₹52,300, +₹38,566] | 2 of 3 seeds | **not consistent** |
+
+Both deltas change sign across streams. Neither ablation shows a consistent
+effect, and the per-seed range is several times the median gap.
+
+**The honest conclusion is a null result, and it is stated as one:**
+
+- The Phase 2 claim that EWMA is not carrying the signal was **seed noise**, and
+  is withdrawn.
+- The opposite claim — that EWMA is vindicated — is **equally unsupported**. Its
+  median net is higher than both ablations, but it loses on one seed out of three.
+- A three-seed test cannot resolve a gap this small relative to its variance.
+  Resolving it needs either many more seeds or a variance-reduction design
+  (common random numbers across variants), and that is a measurement question,
+  not an architecture question.
+
+What can be said with the data in hand: **drop-EWMA costs precision consistently**
+(0.356 median vs 0.456, and its range 0.35–0.37 does not overlap full's 0.40–0.59).
+The net-rupee effect is ambiguous; the precision effect is not.
+
+### 3.1 What the README should argue, and why
+
+Deferred until this table existed, per review. Now that it does:
+
+The write-up should state that **the cost model as parameterised is close to
+indifferent between the full detector and the ablations, and that this is a
+statement about the cost model rather than about the components.** Specifically:
+
+- The rupee model treats review cost as **linear** in alert count. At ₹40 an
+  alert, 27 alerts/day and 4 alerts/day differ by about ₹900 a day, which is
+  noise next to the chargeback exposure term.
+- Linear review cost understates **alert fatigue**. A team receiving 28 alerts a
+  day does not review them 7× as carefully as a team receiving 4; response
+  quality degrades, and past some volume alerts stop being read. That effect is
+  real, well documented in security operations, and **not modelled here**.
+- So the two configurations are not the same product even where the model says
+  they are worth the same.
+
+**Recommendation:** argue for the full configuration on the basis of precision
+(0.456 vs 0.356, non-overlapping ranges) and alert volume, state explicitly that
+the rupee model does not separate them, and name linear review cost as the
+model's known limitation. Do not present any component as vindicated by the
+ablation table — it does not vindicate anything, and claiming otherwise is the
+exact failure this project exists to avoid.
 
 ---
 
 ## 4. Where the numbers are optimistic by construction
 
-From `gen/ASSUMPTIONS.md`, the items that most affect these metrics:
+From `gen/ASSUMPTIONS.md` §2:
 
-- **Positive rate ~1.6%** in the test window, far above real merchant
-  card-testing rates. Precision is reported at both the observed rate and a
-  stated 0.15% target; at the target, precision is unchanged only because FP=0.
-  On any stream where FP > 0, the reweighted figure is the one to quote.
-- **Perfect labels.** No label noise, no late-arriving chargebacks.
-- **One diurnal shape for every merchant**, making the baseline more predictable
+- **Positive rate ~1.33%**, far above real merchant card-testing rates. Precision
+  is reported at both the observed rate and a stated 0.15%; at the target it falls
+  from 0.456 to 0.069.
+- **Perfect labels**, no label noise, no late-arriving chargebacks.
+- **One diurnal shape for every merchant**, so the baseline is more predictable
   than reality.
-- **Attacks are single-merchant, outages are multi-merchant.** Merchant span is
-  therefore a stronger separator here than it would be against a real
-  multi-merchant campaign, and the detector leans on it.
+- **Attacks are single-merchant.** Real campaigns sweep many merchants at once.
+  Note the asymmetry this creates with the outage controls, and that
+  `outage_single_merchant` was added precisely to stop the detector leaning on it.
 
 ---
 
 ## 5. What was not measured, and why
 
 - **Only two ablations.** Drop-Welford and drop-per-device were cut on 2026-08-24
-  to fund the issuer-outage control. The repetition term (§2.3) is the one most
-  worth ablating next, on the evidence above.
+  to fund the outage controls. On the evidence in §2.2, the `repetition` term is
+  now the one most worth ablating.
 - **No latency or throughput numbers.** Phase 4.
-- **Cold-start cost is measured but not costed** — the 5 false positives in §2.1
-  are counted, not converted to rupees, because the replay path does not run the
+- **Cold-start cost is counted, not costed** — the replay path does not run the
   cost model.
+- **Variance reduction was not attempted.** §3's null result is a consequence.
 
 ---
 
 ## 6. Cost-model sensitivities
 
-The net position is dominated by avoided chargeback exposure (₹32,014 of ₹32,871
-gross). That term is the product of two assumptions — a ₹500 dispute fee and an
-0.8 chargeback rate on approved fraud — neither of which is independently
-citable. Halving the assumed chargeback rate roughly halves the headline saving.
+Gross ₹2.82L on the headline seed: avoided chargeback exposure ₹5.59L, saved
+authorization fees ₹13,962, blocked good transactions −₹2.91L.
 
-The saved-authorization-fee term (₹856) is deliberately small so the headline does
-not lean on the least defensible parameter.
+Two things worth noticing:
 
-The **break-even review cost of ₹5,478 per alert** is the figure to quote, because
-it is an output. At 1.5 alerts/day, the detector pays for itself unless reviewing
-an alert costs more than about ₹5,500 — which is a claim a payments panel can
-check against their own analyst costs rather than having to accept ours.
+- **11,800 of the 13,947 blocked clean transactions were going to decline
+  anyway**, and so cost the merchant no margin. That is the outage controls
+  showing up in the cost model exactly as intended — flagging a declining
+  transaction is cheap in rupees even when it is wrong. It is *not* cheap in
+  trust, and the cost model does not capture that.
+- The net position is dominated by the chargeback term, which is the product of
+  two uncitable assumptions (a ₹500 dispute fee, an 0.8 chargeback rate on
+  approved fraud). Halving the assumed rate roughly halves the headline saving.
+
+**The break-even review cost is ₹204 per alert** on the headline seed — down from
+₹5,478 in Phase 2, because alert volume rose from 6 to 1,379. That is the figure
+to quote, because it is an output rather than an assumption: the detector pays for
+itself as long as reviewing an alert costs under ₹204. At 27.6 alerts/day that is
+a real operational constraint rather than a comfortable margin.
 
 ---
 
@@ -249,15 +284,12 @@ check against their own analyst costs rather than having to accept ours.
 
 Ordered by how much they change the credibility of the submission:
 
-1. **Fix the underpowered test window** by generating more attack episodes per
-   scenario. Six episodes cannot support per-scenario claims. This is a generator
-   config change and a regeneration, roughly an hour, and it makes every number
-   in the project more trustworthy. It is not "tuning to look better" — an
-   underpowered evaluation errs in both directions.
-2. **Add a long-horizon window** on the BIN axis so `slow_low` is detectable at
-   all. Design change, not tuning.
-3. **Re-examine the repetition term** at a window size where it can actually fire,
-   or drop it and let merchant span and amount carry the outage rejection.
-4. **Decide the EWMA question deliberately** (§3), and say in the README which
-   trade was chosen and why, rather than letting the ablation table raise a
-   question the write-up does not answer.
+1. **Give the detector a long-horizon window** on the BIN axis so retry structure
+   is visible at the scale it actually occurs (§2.2). This is the single change
+   most likely to fix §2.1, which is the worst result in the project.
+2. **Model alert fatigue, or stop reporting net rupees as the deciding metric**
+   (§3.1). Linear review cost is why the cost model cannot separate the variants.
+3. **Reduce variance before running ablations again** — common random numbers
+   across variants, or more seeds. §3 is currently a null result for measurement
+   reasons, not architectural ones.
+4. **Persist baselines across restarts** to remove the cold-start failure (§2.3).

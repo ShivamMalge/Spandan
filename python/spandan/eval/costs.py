@@ -184,3 +184,28 @@ def reweight_to_prevalence(
         recall=tp / positives,
         effective_fp=effective_fp,
     )
+
+
+def gross_at(pre, threshold: float, model: CostModel) -> float:
+    """Gross rupee position at a threshold, vectorised. See metrics.SweepPrecompute."""
+    import numpy as np
+
+    flagged = pre.scores > threshold
+    if not flagged.any():
+        return 0.0
+
+    fraud = flagged & (pre.labels == 1)
+    clean = flagged & (pre.labels == 0)
+
+    saved_auth = float(fraud.sum()) * model.auth_fee_paise
+    approved_fraud = fraud & pre.approved
+    exposure = (
+        model.chargeback_fee_paise
+        + model.chargeback_loss_fraction * pre.amounts[approved_fraud]
+    )
+    avoided = model.chargeback_rate_on_approved_fraud * float(np.sum(exposure))
+
+    chargeable = clean & pre.approved if model.only_charge_if_approved else clean
+    blocked_good = model.contribution_margin * float(np.sum(pre.amounts[chargeable]))
+
+    return saved_auth + avoided - blocked_good

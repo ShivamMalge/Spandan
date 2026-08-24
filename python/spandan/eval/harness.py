@@ -19,9 +19,9 @@ import numpy as np
 
 from ..detect import DetectorConfig, ReferenceDetector
 from ..gen.build import MANIFEST_FILENAME
-from ..gen.schema import ATTACK_SCENARIOS, Event
+from ..gen.schema import ATTACK_SCENARIOS, NEGATIVE_CONTROLS, Event
 from . import metrics
-from .costs import CostModel, compute_costs, reweight_to_prevalence
+from .costs import CostModel, compute_costs, gross_at, reweight_to_prevalence
 from .loader import Split, load_split
 
 def _use_utf8_stdout() -> str:
@@ -42,6 +42,16 @@ def _use_utf8_stdout() -> str:
 
 
 R = _use_utf8_stdout()
+
+#: Which axis each negative control attacks. Used so the false-positive table is
+#: driven by the schema rather than by a hand-written pair - the single-merchant
+#: control was added and silently missed the table on its first run, which is the
+#: precise failure this dict prevents.
+CONTROL_AXES = {
+    "flash_sale": "volume",
+    "issuer_outage": "decline ratio",
+    "outage_single_merchant": "decline ratio, no crutches",
+}
 
 
 def rupees(paise: float) -> str:
@@ -71,6 +81,26 @@ def score_with_warmup(
     return detector.score_batch(target)
 
 
+def score_split_once(split: Split, config: DetectorConfig) -> tuple[np.ndarray, np.ndarray]:
+    """Validation and test scores from a SINGLE pass over the whole stream.
+
+    The detector is causal and processes events in order, so feeding
+    warmup -> validation -> test through one state machine produces exactly the
+    scores that two separate warmed passes produce. Doing it once instead of
+    twice removes about 40% of the evaluation's runtime, which matters now that
+    the stream is 100 days rather than 14.
+
+    `test_single_pass_matches_two_pass_scoring` asserts the equivalence rather
+    than assuming it - this is the kind of optimisation that is easy to get
+    subtly wrong and impossible to notice afterwards.
+    """
+    detector = ReferenceDetector(config)
+    detector.score_batch(split.train_warmup)
+    validation_scores = detector.score_batch(split.validation)
+    test_scores = detector.score_batch(split.test)
+    return validation_scores, test_scores
+
+
 # --- threshold selection, on validation only --------------------------------
 
 
@@ -87,24 +117,34 @@ def sweep_thresholds(
     question nobody asked; the sweep answers the question that was asked, which
     is why this threshold and not another one.
     """
-    lo = float(np.percentile(scores, 50.0))
+    lo = float(np.percentile(scores, 75.0))
     hi = float(np.max(scores))
     grid = np.linspace(lo, hi, count)
 
+    # Everything at or below the lowest threshold on the grid is invisible to
+    # every row, so the sweep works on the candidate subset. The per-threshold
+    # arithmetic is then vectorised - the per-event Python loops cost ~100s per
+    # sweep on a 100-day stream and dominated `make eval`.
+    keep = np.flatnonzero(scores > lo)
+    candidates = [events[i] for i in keep]
+    candidate_scores = scores[keep]
+    pre = metrics.SweepPrecompute(candidates, candidate_scores)
+    labels = np.array([e.label for e in events])
+
     rows = []
     for threshold in grid:
-        alert_list = metrics.alerts(events, scores, threshold)
-        breakdown = compute_costs(events, scores, threshold, model, len(alert_list))
-        confusion = metrics.confusion_at(scores, np.array([e.label for e in events]), threshold)
+        alerts = metrics.alert_count_at(pre, threshold)
+        gross = gross_at(pre, threshold, model)
+        confusion = metrics.confusion_at(scores, labels, threshold)
         rows.append(
             {
                 "threshold": float(threshold),
-                "gross_paise": breakdown.gross_paise,
-                "net_paise": breakdown.net_paise(model.assumed_review_paise),
-                "alerts": len(alert_list),
+                "gross_paise": gross,
+                "net_paise": gross - alerts * model.assumed_review_paise,
+                "alerts": alerts,
                 "precision": confusion.precision,
                 "recall": confusion.recall,
-                "break_even_paise": breakdown.break_even_review_paise(),
+                "break_even_paise": (gross / alerts) if alerts else 0.0,
             }
         )
     return rows
@@ -149,12 +189,11 @@ def evaluate(
     model: CostModel,
     episode_windows: list[dict],
 ) -> dict:
-    validation_scores = score_with_warmup(split.train_warmup, split.validation, config)
+    validation_scores, test_scores = score_split_once(split, config)
     sweep = sweep_thresholds(split.validation, validation_scores, model)
     chosen = select_threshold(sweep)
     threshold = chosen["threshold"]
 
-    test_scores = score_with_warmup(split.train, split.test, config)
     labels = np.array([e.label for e in split.test])
 
     confusion = metrics.confusion_at(test_scores, labels, threshold)
@@ -234,6 +273,36 @@ def render(result: dict, model: CostModel, split: Split) -> None:
 
     print()
     print("=" * 78)
+    print("DETECTION SPEED  -- the number closest to the product")
+    print("=" * 78)
+    print("A spike detector is judged on how fast it catches an episode, not only on")
+    print("whether it eventually does. Attempt 40 and attempt 400 are both recall=1 and")
+    print("are not the same outcome for the merchant. An episode has to be caught ONCE")
+    print("to be acted on, so episode detection and event recall measure different")
+    print("things and both are reported.")
+    print()
+    print(f"{'scenario':<14}{'episodes':>9}{'caught':>9}{'med events':>12}{'p90 events':>12}{'med rupees':>13}")
+    for name in ATTACK_SCENARIOS:
+        row = result["time_to_detection"].get(name)
+        if not row:
+            continue
+        med = row["median_events"]
+        p90 = row["p90_events"]
+        rup = row["median_rupees"]
+        caught = row["episodes"] - row["missed"]
+        caught_cell = f"{caught}/{row['episodes']}"
+        print(
+            f"{name:<14}{row['episodes']:>9}{caught_cell:>9}"
+            f"{('never' if math.isinf(med) else f'{med:.0f}'):>12}"
+            f"{('never' if math.isinf(p90) else f'{p90:.0f}'):>12}"
+            f"{('-' if math.isinf(rup) else f'{R}{rup:,.0f}'):>13}"
+        )
+    print()
+    print("`med events` = events into the episode before the first flag.")
+    print("`med rupees` = value that went through before the first flag.")
+
+    print()
+    print("=" * 78)
     print("METRICS ON THE TEMPORAL TEST SET")
     print("=" * 78)
     print(f"{'precision':<14}{confusion.precision:>10.4f}")
@@ -259,7 +328,13 @@ def render(result: dict, model: CostModel, split: Split) -> None:
         f"headroom                     {margin['headroom']:>8.2f}  "
         f"({margin['headroom_pct']:.1%} of the threshold)"
     )
-    if margin["headroom_pct"] < 0.25:
+    if margin["headroom"] < 0:
+        print()
+        print("HEADROOM IS NEGATIVE. The threshold sits BELOW the highest-scoring clean")
+        print(f"event, so `{margin['highest_clean_scenario']}` is not being rejected at all -")
+        print("it is being scored like an attack and separated only by where the line")
+        print("happens to fall. This is a measured failure of the detector, not a margin.")
+    elif margin["headroom_pct"] < 0.25:
         print("that is a narrow separation. Read the multi-seed spread below before")
         print("treating this precision as stable - one unlucky stream closes this gap.")
 
@@ -282,47 +357,37 @@ def render(result: dict, model: CostModel, split: Split) -> None:
 
     print()
     print("-- per scenario " + "-" * 62)
-    print(f"{'scenario':<16}{'events':>9}{'flagged':>9}{'rate':>9}   what the rate means")
+    print(f"{'scenario':<24}{'events':>9}{'flagged':>9}{'rate':>9}   what the rate means")
     for name, row in result["per_scenario"].items():
         meaning = "recall" if row["is_attack"] else "FALSE POSITIVES"
         print(
-            f"{name:<16}{row['events']:>9}{row['flagged']:>9}{row['rate']:>9.4f}   {meaning}"
+            f"{name:<24}{row['events']:>9}{row['flagged']:>9}{row['rate']:>9.4f}   {meaning}"
         )
 
-    print()
-    print("-- episode detection and time to detection " + "-" * 35)
-    print("event-level recall understates the operational question: an episode has to")
-    print("be caught ONCE to be acted on. Both are reported; neither replaces the other.")
-    print(f"{'scenario':<14}{'episodes':>9}{'caught':>8}{'med events':>12}{'p90 events':>12}{'med rupees':>13}")
-    for name in ATTACK_SCENARIOS:
-        row = result["time_to_detection"].get(name)
-        if not row:
-            continue
-        med = row["median_events"]
-        p90 = row["p90_events"]
-        rup = row["median_rupees"]
-        caught = row["episodes"] - row["missed"]
-        caught_cell = f"{caught}/{row['episodes']}"
-        print(
-            f"{name:<14}{row['episodes']:>9}{caught_cell:>8}"
-            f"{('never' if math.isinf(med) else f'{med:.0f}'):>12}"
-            f"{('never' if math.isinf(p90) else f'{p90:.0f}'):>12}"
-            f"{('-' if math.isinf(rup) else f'{R}{rup:,.0f}'):>13}"
-        )
 
     print()
     print("=" * 78)
     print("FALSE-POSITIVE COST, BY NEGATIVE CONTROL")
     print("=" * 78)
-    print("the two controls attack different axes and are not averaged together")
-    print(f"{'control':<16}{'flagged':>9}{'blocked-good cost':>20}   axis")
-    for name, axis in (("flash_sale", "volume"), ("issuer_outage", "decline ratio")):
+    print("each control attacks a different axis; they are never averaged together")
+    print(f"{'control':<24}{'events':>9}{'flagged':>9}{'rate':>8}{'blocked-good cost':>20}   axis")
+    for name in NEGATIVE_CONTROLS:
         flagged = costs.per_scenario_flagged.get(name, 0)
         cost = costs.per_scenario_blocked_good_paise.get(name, 0.0)
-        print(f"{name:<16}{flagged:>9}{rupees(cost):>20}   {axis}")
+        total = result["per_scenario"].get(name, {}).get("events", 0)
+        rate = flagged / total if total else 0.0
+        print(
+            f"{name:<24}{total:>9}{flagged:>9}{rate:>8.4f}{rupees(cost):>20}   "
+            f"{CONTROL_AXES.get(name, '')}"
+        )
     benign_flagged = costs.per_scenario_flagged.get("benign", 0)
     benign_cost = costs.per_scenario_blocked_good_paise.get("benign", 0.0)
-    print(f"{'benign':<16}{benign_flagged:>9}{rupees(benign_cost):>20}   ordinary traffic")
+    benign_total = result["per_scenario"].get("benign", {}).get("events", 0)
+    benign_rate = benign_flagged / benign_total if benign_total else 0.0
+    print(
+        f"{'benign':<24}{benign_total:>9}{benign_flagged:>9}{benign_rate:>8.4f}"
+        f"{rupees(benign_cost):>20}   ordinary traffic"
+    )
     print()
     print(
         f"of {costs.blocked_good_events} blocked clean transactions, "
@@ -504,90 +569,201 @@ def main(argv: list[str] | None = None) -> int:
     render(result, model, split)
     render_sweep(result, model)
 
-    ablation_rows = run_ablations(split, config, model, result["threshold"])
-    render_ablations(ablation_rows)
-
-    seed_rows = run_multiseed(args.seeds, manifest["seed"], config, model)
-    render_multiseed(seed_rows)
-    render_verdict(result, seed_rows, model)
+    rows = run_seed_matrix(args.seeds, manifest["seed"], config, model)
+    render_ablation_matrix(rows, args.seeds)
+    render_multiseed(rows)
+    render_verdict(result, rows, model)
 
     if args.json_out:
         Path(args.json_out).write_text(
-            json.dumps(summarise(result, ablation_rows, seed_rows), indent=2, sort_keys=True),
+            json.dumps(summarise(result, rows), indent=2, sort_keys=True),
             encoding="utf-8",
         )
     return 0
 
 
-def run_ablations(
-    split: Split, config: DetectorConfig, model: CostModel, _threshold: float
-) -> list[dict]:
-    variants = [
-        ("full", config),
-        ("drop-EWMA", replace(config, use_ewma=False)),
-        ("drop-per-IP", replace(config, use_per_ip=False)),
-    ]
-    rows = []
-    for name, variant in variants:
-        validation_scores = score_with_warmup(split.train_warmup, split.validation, variant)
-        sweep = sweep_thresholds(split.validation, validation_scores, model)
-        chosen = select_threshold(sweep)["threshold"]
-
-        test_scores = score_with_warmup(split.train, split.test, variant)
-        labels = np.array([e.label for e in split.test])
-        confusion = metrics.confusion_at(test_scores, labels, chosen)
-        alert_list = metrics.alerts(split.test, test_scores, chosen)
-        breakdown = compute_costs(split.test, test_scores, chosen, model, len(alert_list))
-        rows.append(
-            {
-                "name": name,
-                "precision": confusion.precision,
-                "recall": confusion.recall,
-                "pr_auc": metrics.average_precision(test_scores, labels),
-                "net_paise": breakdown.net_paise(model.assumed_review_paise),
-                "alerts": len(alert_list),
-            }
-        )
-    return rows
+VARIANTS = ("full", "drop-EWMA", "drop-per-IP")
 
 
-def run_multiseed(
+def variant_config(name: str, config: DetectorConfig) -> DetectorConfig:
+    if name == "full":
+        return config
+    if name == "drop-EWMA":
+        return replace(config, use_ewma=False)
+    if name == "drop-per-IP":
+        return replace(config, use_per_ip=False)
+    raise ValueError(f"unknown variant {name}")
+
+
+def run_seed_matrix(
     seed_count: int, base_seed: int, config: DetectorConfig, model: CostModel
 ) -> list[dict]:
-    """Re-run the whole evaluation on freshly generated streams.
+    """Every variant on every seed.
 
-    Generates into a temp directory each time. Not a resample of one dataset —
-    a different stream, so the spread reflects generator variance rather than
-    sampling variance within a fixed draw.
+    Phase 2 ran the ablations on a single stream, which was the gap in that
+    report: with headline precision swinging 0.67-1.00 across seeds, a rupee gap
+    between two variants measured on one stream is indistinguishable from that
+    stream happening to disfavour one of them. An architectural claim needs the
+    spread.
+
+    One generation per seed, one scoring pass per (seed, variant).
     """
     import tempfile
 
     from ..gen.build import build
-    from ..gen.config import DEFAULT_CONFIG
+    from ..gen.config import default_config
 
     rows = []
     for offset in range(max(seed_count, 1)):
         seed = base_seed + offset
         with tempfile.TemporaryDirectory() as tmp:
-            gen_config = replace(DEFAULT_CONFIG, seed=seed)
-            manifest = build(gen_config, tmp)
+            manifest = build(default_config(seed=seed), tmp)
             split = load_split(tmp)
-            result = evaluate(split, config, model, manifest["episode_windows"])
-            rows.append(
-                {
-                    "seed": seed,
-                    "threshold": result["threshold"],
-                    "precision": result["confusion"].precision,
-                    "recall": result["confusion"].recall,
-                    "pr_auc": result["average_precision"],
-                    "net_rupees": result["costs"].net_paise(model.assumed_review_paise) / 100.0,
-                    "alerts_per_day": result["alerts_per_day"],
-                }
-            )
+            windows = manifest["episode_windows"]
+            for name in VARIANTS:
+                result = evaluate(split, variant_config(name, config), model, windows)
+                confusion = result["confusion"]
+                rows.append(
+                    {
+                        "seed": seed,
+                        "variant": name,
+                        "threshold": result["threshold"],
+                        "precision": confusion.precision,
+                        "recall": confusion.recall,
+                        "pr_auc": result["average_precision"],
+                        "net_rupees": result["costs"].net_paise(model.assumed_review_paise) / 100.0,
+                        "alerts": result["costs"].alerts,
+                        "alerts_per_day": result["alerts_per_day"],
+                        "headroom_pct": result["margin"]["headroom_pct"],
+                    }
+                )
     return rows
 
 
-def summarise(result: dict, ablations: list[dict], seeds: list[dict]) -> dict:
+def _spread(values: list[float]) -> tuple[float, float, float]:
+    return min(values), float(np.median(values)), max(values)
+
+
+def render_ablation_matrix(rows: list[dict], seed_count: int) -> None:
+    print()
+    print("=" * 78)
+    print("ABLATIONS, ACROSS SEEDS")
+    print("=" * 78)
+    print("two ablations, not four: drop-Welford and drop-per-device were cut on Aug 24")
+    print("to fund the issuer-outage control.")
+    print()
+    print(f"median across {seed_count} streams, with [min, max]:")
+    print(f"{'variant':<14}{'precision':>22}{'recall':>22}{'net rupees':>24}")
+    for name in VARIANTS:
+        subset = [row for row in rows if row["variant"] == name]
+        if not subset:
+            continue
+        p_lo, p_mid, p_hi = _spread([r["precision"] for r in subset])
+        r_lo, r_mid, r_hi = _spread([r["recall"] for r in subset])
+        n_lo, n_mid, n_hi = _spread([r["net_rupees"] for r in subset])
+        print(
+            f"{name:<14}"
+            f"{f'{p_mid:.3f} [{p_lo:.2f},{p_hi:.2f}]':>22}"
+            f"{f'{r_mid:.3f} [{r_lo:.2f},{r_hi:.2f}]':>22}"
+            f"{f'{n_mid:,.0f} [{n_lo:,.0f},{n_hi:,.0f}]':>24}"
+        )
+
+    full = [r for r in rows if r["variant"] == "full"]
+    print()
+    print("does any ablation gap survive the spread? paired per seed, which is the")
+    print("only comparison that controls for the stream:")
+    for name in VARIANTS[1:]:
+        variant = [r for r in rows if r["variant"] == name]
+        deltas = [
+            v["net_rupees"] - f["net_rupees"]
+            for f, v in zip(full, variant)
+            if f["seed"] == v["seed"]
+        ]
+        if not deltas:
+            continue
+        wins = sum(1 for d in deltas if d > 0)
+        lo, mid, hi = _spread(deltas)
+        verdict = "CONSISTENT" if wins in (0, len(deltas)) else "NOT consistent across seeds"
+        print(
+            f"  {name:<14} net delta vs full: median {R}{mid:,.0f} "
+            f"[{R}{lo:,.0f}, {R}{hi:,.0f}]  beats full on {wins}/{len(deltas)} seeds  -> {verdict}"
+        )
+
+
+def render_multiseed(rows: list[dict]) -> None:
+    """Stability of the shipped configuration, across streams."""
+    full = [row for row in rows if row["variant"] == "full"]
+    print()
+    print("=" * 78)
+    print("MULTI-SEED STABILITY (full configuration)")
+    print("=" * 78)
+    if len(full) < 2:
+        print("single seed only (pass SEEDS=3 for the spread)")
+        return
+    print("if the spread is wide, the headline numbers are noise and should not be")
+    print("reported as if they were stable.")
+    print(f"{'metric':<20}{'min':>12}{'median':>12}{'max':>12}{'spread':>12}")
+    for key, label, fmt in (
+        ("precision", "precision", "{:.4f}"),
+        ("recall", "recall", "{:.4f}"),
+        ("pr_auc", "PR-AUC", "{:.4f}"),
+        ("net_rupees", "net rupees", "{:,.0f}"),
+        ("alerts_per_day", "alerts/day", "{:.1f}"),
+        ("headroom_pct", "headroom %", "{:.3f}"),
+    ):
+        lo, mid, hi = _spread([row[key] for row in full])
+        print(
+            f"{label:<20}{fmt.format(lo):>12}{fmt.format(mid):>12}{fmt.format(hi):>12}"
+            f"{fmt.format(hi - lo):>12}"
+        )
+
+    print()
+    print("per seed - the diagnostic that says WHERE the instability is:")
+    print(f"{'seed':>10}{'threshold':>11}{'PR-AUC':>9}{'precision':>11}{'recall':>9}")
+    for row in full:
+        print(
+            f"{row['seed']:>10}{row['threshold']:>11.2f}{row['pr_auc']:>9.4f}"
+            f"{row['precision']:>11.4f}{row['recall']:>9.4f}"
+        )
+    pr_lo, _, pr_hi = _spread([r["pr_auc"] for r in full])
+    th_lo, _, th_hi = _spread([r["threshold"] for r in full])
+    print()
+    print(f"PR-AUC is threshold-free, so its spread ({pr_hi - pr_lo:.4f}) is the detector")
+    print(f"and the data, not the operating point. Thresholds ranged {th_lo:.2f} to {th_hi:.2f}.")
+
+
+def render_verdict(result: dict, rows: list[dict], model: CostModel) -> None:
+    """The honest summary, after the spread is known."""
+    full = [row for row in rows if row["variant"] == "full"]
+    print()
+    print("=" * 78)
+    print("VERDICT")
+    print("=" * 78)
+    confusion = result["confusion"]
+    if len(full) < 2:
+        print("single seed. Run with SEEDS=3 before believing any of the above.")
+        return
+
+    p_lo, p_mid, p_hi = _spread([r["precision"] for r in full])
+    r_lo, r_mid, r_hi = _spread([r["recall"] for r in full])
+    n_lo, n_mid, n_hi = _spread([r["net_rupees"] for r in full])
+
+    print(f"headline seed: precision {confusion.precision:.4f}, recall {confusion.recall:.4f}.")
+    print(
+        f"across {len(full)} streams: precision {p_mid:.3f} [{p_lo:.2f}, {p_hi:.2f}], "
+        f"recall {r_mid:.3f} [{r_lo:.2f}, {r_hi:.2f}],"
+    )
+    print(f"net {R}{n_mid:,.0f} [{R}{n_lo:,.0f}, {R}{n_hi:,.0f}].")
+    print()
+    if (p_hi - p_lo) > 0.15 or (r_hi - r_lo) > 0.15:
+        print("*** THE HEADLINE NUMBERS ARE NOT STABLE. ***")
+        print("Report the median and the range. See docs/FAILURE_MODES.md 0.")
+    else:
+        print("the spread is narrow enough to report the median with its range attached.")
+        print("quote the median, never the single-seed figure on its own.")
+
+
+def summarise(result: dict, rows: list[dict]) -> dict:
     confusion = result["confusion"]
     costs = result["costs"]
     reweighted = result["reweighted"]
@@ -605,8 +781,7 @@ def summarise(result: dict, ablations: list[dict], seeds: list[dict]) -> dict:
         "alerts": costs.alerts,
         "alerts_per_day": result["alerts_per_day"],
         "per_scenario": result["per_scenario"],
-        "ablations": [{k: v for k, v in row.items()} for row in ablations],
-        "multiseed": seeds,
+        "seed_matrix": rows,
     }
 
 

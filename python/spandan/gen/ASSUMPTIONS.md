@@ -22,11 +22,28 @@ full config, so any figure can be traced to the settings that produced it.
 
 | Choice | Value | Why |
 |---|---|---|
-| Stream span | 14 days from 2026-06-01 00:00 IST | Long enough for per-entity baselines (EWMA, Welford) to warm up before the test window opens, short enough to regenerate in ~11s. |
-| Train window | days 0–10 | Phase 2 carves its validation window out of this period. Thresholds are never selected on test. |
-| Test window | days 10–14 | Strictly later. The boundary is a wall: no event straddles it. |
+| Stream span | **100 days** from 2026-06-01 00:00 IST | See below — the span is set by statistical power, not by realism. |
+| Train window | days 0–50 | Phase 2 carves its validation window (the last 25%) out of this period. Thresholds are never selected on test. |
+| Test window | days 50–100 | Strictly later. The boundary is a wall: no event straddles it, asserted by `test_no_episode_straddles_the_split_boundary`. |
 | Merchants | 10 | Enough for per-merchant baselines to differ; small enough that each has real volume. |
-| Volume | ~214k events | ~150k train / ~64k test. |
+| Volume | ~1.61M events | ~804k train / ~805k test. |
+| Episodes | **20 per scenario per split**, 240 total | Two was an anecdote. See below. |
+
+**Why the span is 100 days and not 14.** The first version of this stream ran 14
+days and put two episodes of each scenario in the test window. Phase 2 measured
+what that costs: per-scenario recall swung 0.16–0.54 across three seeds, because
+every per-scenario number rested on a sample of two.
+
+The fix had to raise statistical power without making the task easier or harder.
+So the **episode rate per day is unchanged** (~0.4 per scenario per day) and the
+stream was made longer. Packing more episodes into the original 14 days would
+have been a difficulty change wearing a statistics costume: more attack traffic
+per day means more attack traffic folded into the per-BIN baselines those attacks
+are measured against. `test_more_episodes_came_from_a_longer_stream_not_a_denser_one`
+asserts the density is unchanged, so this cannot silently drift.
+
+A 100-day stream is also more realistic than a 14-day one for baseline warm-up,
+but that is a side benefit and not the reason.
 
 The start timestamp is a fixed constant, never "now". A dataset that changes when
 you regenerate it next month is not a held-out test set.
@@ -91,7 +108,7 @@ collides with anything real is checkable rather than asserted (`agents.md` §7).
 `test_all_identifiers_synthetic` and `test_no_card_reference_could_be_mistaken_for_a_pan`
 check every event, not a sample.
 
-### 1.7 The five scenarios
+### 1.7 The six scenarios
 
 Described as statistical signatures — rate, entity concentration, amount band,
 decline ratio — and nothing else (`agents.md` §7). Each appears in both the train
@@ -104,7 +121,8 @@ select a threshold on a validation window.
 | `rotating` | 1 | Same BIN and card concentration; IP and device spread across 55–74 values, 22–31 minutes. No single address carries unusual volume. |
 | `slow_low` | 1 | Same concentration, 48–66 events spread over 5.5–7 hours, decline ratio 0.69–0.75. Sits underneath a fixed per-window count. |
 | `flash_sale` | **0** | 760–1,020 distinct cards over 45–60 minutes, many issuers, ordinary amounts, decline ratio 0.14–0.17. Negative control on the **volume** axis. |
-| `issuer_outage` | **0** | One BIN, 55–78 minutes, 760–1,050 events across only 250–340 cards (retries), ordinary amounts, decline ratio 0.79–0.86, spanning 4–5 merchants. Negative control on the **decline-ratio** axis — see §1.7b. |
+| `issuer_outage` | **0** | One BIN, 55–78 minutes, 760–1,050 events across only ~30% as many cards (retries), ordinary amounts, decline ratio 0.79–0.86, spanning 4–5 merchants. Negative control on the **decline-ratio** axis — see §1.7b. |
+| `outage_single_merchant` | **0** | The same outage at **one** merchant, with amounts in the same low band as a probe burst. Strips away the two separators the detector was actually using, leaving only retry structure. The hardest control by a wide margin — see §1.7c. |
 
 Two modelling choices inside these matter more than the numbers:
 
@@ -150,9 +168,9 @@ The two populations differ in card novelty:
 
 | Population | Cards never seen elsewhere in the stream |
 |---|---|
-| Attack scenarios (`burst`, `rotating`, `slow_low`) | **100%** — 0 of 1,834 attack cards appear in benign traffic |
-| `flash_sale` | **42.5%** |
-| `issuer_outage` | **10.1%** |
+| Attack scenarios (`burst`, `rotating`, `slow_low`) | **100%** — no attack card appears in benign traffic |
+| `flash_sale` | ~42% |
+| `issuer_outage`, `outage_single_merchant` | ~10% |
 
 So the flash sale controls fully for **volume** and only **partially** for
 **novelty**. A detector that keyed on "share of never-before-seen cards" would
@@ -212,6 +230,33 @@ responses: a flash sale is a merchant event, an outage is an issuer event.
 `test_issuer_outage_is_separable_from_a_burst_without_decline_ratio` assert both
 halves — that it is attack-like on the primary axis, and that the separators
 actually exist.
+
+### 1.7c The single-merchant outage: the control that removed the crutch
+
+Phase 2 measured *which* separator was doing the work in §1.7b, and the answer was
+uncomfortable: the multi-merchant outage was being rejected by **merchant span and
+amount**, not by the retry structure it was built around. The retry signal is
+largely invisible to the detector, because retries are spread across a 60-minute
+episode while the detector's repetition term looks inside a 5-minute window — and
+within any single window an outage's cards look nearly as distinct as a burst's.
+
+So the control was passing for reasons that had little to do with the axis it was
+built to test. `outage_single_merchant` removes both crutches:
+
+| | `issuer_outage` | `outage_single_merchant` | `burst` |
+|---|---|---|---|
+| merchants | 4–5 | **1** | 1 |
+| amounts | ordinary baskets | **₹1–₹60 band** | ₹1–₹60 band |
+| retries per card | ~3.3 | ~4.7 | ~1.0 |
+| decline ratio | 0.79–0.86 | 0.79–0.86 | 0.83–0.89 |
+
+What is left to separate it from card testing is retry structure and nothing else.
+This is also the outage a payments panel pictures — a single merchant seeing a wall
+of small declines on one BIN — so it is the realistic version as well as the hard
+one.
+
+It fires. See `docs/FAILURE_MODES.md`: this is now the largest measured failure
+mode in the project, and it is a result rather than a defect in the control.
 
 ### 1.8 Determinism
 

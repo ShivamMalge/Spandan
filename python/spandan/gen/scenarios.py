@@ -50,6 +50,7 @@ from .schema import (
     ATTACK_SCENARIOS,
     SCENARIO_FLASH_SALE,
     SCENARIO_ISSUER_OUTAGE,
+    SCENARIO_OUTAGE_SINGLE,
     STATUS_APPROVED,
     STATUS_DECLINED,
     Event,
@@ -83,9 +84,16 @@ def generate_episode(
     if spec.scenario_id == SCENARIO_FLASH_SALE:
         cards, ips, devices, bins_ = _flash_sale_entities(spec, index, cfg, pools, rng)
         amounts = _flash_sale_amounts(spec, cfg, episode_merchants[0], rng)
-    elif spec.scenario_id == SCENARIO_ISSUER_OUTAGE:
+    elif spec.scenario_id in (SCENARIO_ISSUER_OUTAGE, SCENARIO_OUTAGE_SINGLE):
         cards, ips, devices, bins_ = _issuer_outage_entities(spec, pools, rng)
-        amounts = _ordinary_amounts(spec, cfg, episode_merchants, merchant_pick, rng)
+        if spec.scenario_id == SCENARIO_OUTAGE_SINGLE:
+            # Attack-like amounts: the separator the detector was leaning on
+            # is deliberately removed. See schedule.py.
+            amounts = rng.integers(
+                spec.amount_min_paise, spec.amount_max_paise + 1, size=spec.event_count
+            )
+        else:
+            amounts = _ordinary_amounts(spec, cfg, episode_merchants, merchant_pick, rng)
     else:
         cards, ips, devices, bins_ = _attack_entities(spec, index, pools, rng)
         amounts = rng.integers(

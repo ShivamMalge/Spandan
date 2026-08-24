@@ -342,4 +342,50 @@ def test_full_config_uses_the_same_reserved_ranges():
     assert DEFAULT_CONFIG.benign_decline_rate_min > 0.0
     assert DEFAULT_CONFIG.train_days < DEFAULT_CONFIG.total_days
     scenario_ids = {spec.scenario_id for spec in DEFAULT_CONFIG.episodes}
-    assert scenario_ids == {"burst", "rotating", "slow_low", "flash_sale", "issuer_outage"}
+    assert scenario_ids == {
+        "burst",
+        "rotating",
+        "slow_low",
+        "flash_sale",
+        "issuer_outage",
+        "outage_single_merchant",
+    }
+
+
+def test_shipped_schedule_has_enough_episodes_to_support_a_claim():
+    """Phase 2 review: two episodes per scenario per split is an anecdote.
+
+    Twenty is the floor agreed for a per-scenario number to mean anything.
+    """
+    from spandan.gen.schedule import describe_schedule
+
+    counts = describe_schedule(DEFAULT_CONFIG.episodes, DEFAULT_CONFIG.train_days)
+    for scenario, splits in counts.items():
+        assert splits["train"] >= 20, f"{scenario}: only {splits['train']} train episodes"
+        assert splits["test"] >= 20, f"{scenario}: only {splits['test']} test episodes"
+
+
+def test_more_episodes_came_from_a_longer_stream_not_a_denser_one():
+    """The power fix must not be a difficulty change.
+
+    Episodes per scenario per DAY must be unchanged from the Phase 1 schedule
+    (~0.4/day). If it rose, more attack traffic would be folding into the per-BIN
+    baselines those attacks are measured against, which is a difficulty change
+    wearing a statistics costume.
+    """
+    from spandan.gen.schedule import EPISODES_PER_DAY, describe_schedule
+
+    counts = describe_schedule(DEFAULT_CONFIG.episodes, DEFAULT_CONFIG.train_days)
+    train_days = DEFAULT_CONFIG.train_days
+    test_days = DEFAULT_CONFIG.total_days - train_days
+
+    for scenario, splits in counts.items():
+        assert splits["train"] / train_days == pytest.approx(EPISODES_PER_DAY, abs=0.05), scenario
+        assert splits["test"] / test_days == pytest.approx(EPISODES_PER_DAY, abs=0.05), scenario
+
+
+def test_no_episode_straddles_the_split_boundary():
+    boundary = DEFAULT_CONFIG.train_days
+    for spec in DEFAULT_CONFIG.episodes:
+        end_day = spec.day + spec.duration_minutes / 1440.0
+        assert not (spec.day < boundary < end_day), f"{spec.scenario_id} at day {spec.day}"

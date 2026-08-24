@@ -98,36 +98,3 @@ demo artifact. A detector deployed against a new merchant, or restarted, has no
 per-entity baseline and will over-flag exactly the traffic that most resembles an
 attack. It is now in `docs/FAILURE_MODES.md` with the numbers, and `--cold-start`
 exists so it can be demonstrated rather than described.
-## 2026-08-24 — the threshold sweep, not the detector, was 80% of `make eval`
-**Phase:** 2 (addendum)
-**Symptom:** after the stream grew from 14 days to 100, a single-seed `make eval`
-took **12m30s**. The obvious suspect was the detector: 1.6M events at ~25k events/s
-is 64 seconds a pass, and the run makes four passes.
-**First believed:** scoring dominated and the only fix was Phase 3's Rust core.
-**Actually wrong:** scoring was ~256s of the 750s. The threshold sweep was ~100s
-*per call* and there are four of them. The sweep evaluates 60 operating points, and
-each one re-walked the candidate events in Python — `metrics.alerts` building a
-dict per flagged event and `compute_costs` doing per-event attribute access. At
-~51k candidates that is ~3M dict constructions and ~3M attribute walks per sweep,
-for arithmetic that is pure array work.
-**Fix:** `metrics.SweepPrecompute` derives the arrays once (scores, labels,
-amounts, approved-flags, and a (merchant, BIN) group code, all sorted by group then
-time). `alert_count_at` then finds alert boundaries with two vector comparisons —
-a flagged event starts a new alert when its predecessor is in a different group or
-more than the cooldown earlier — and `costs.gross_at` reduces the cost model to
-masked sums.
-**Proved by:** sweep time **100s -> 0.36s** for 60 thresholds, a ~280x reduction,
-with exact agreement against the per-event loops at every threshold checked:
-```
-  th=    2.10  alerts vec= 34104 loop= 34104   gross vec=-622,325,158.9 loop=-622,325,158.9
-  th=   59.24  alerts vec=     7 loop=     7   gross vec=     442,278.1 loop=     442,278.1
-  th=  112.57  alerts vec=     1 loop=     1   gross vec=         150.0 loop=         150.0
-```
-**Kept honest by:** `test_vectorised_sweep_agrees_with_the_per_event_loops` checks
-12 thresholds on every run. The per-event loops are still the reference and are
-still what `evaluate` uses for the final reported numbers; the vectorised path is
-only the sweep. A fast path that quietly disagrees with the reference would be
-worse than a slow one.
-**Worth noting for Phase 4:** the instinct to blame the slowest-looking component
-was wrong by a factor of three. That is the argument for measuring before
-optimising, and it is the same discipline the Rust-vs-NumPy benchmark will need.

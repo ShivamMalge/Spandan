@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..gen.schema import ATTACK_SCENARIOS, SCENARIOS, Event
+from ..gen.schema import ATTACK_SCENARIOS, SCENARIOS, STATUS_APPROVED, Event
 
 #: Two flagged events on the same (merchant, BIN) inside this gap are the same
 #: alert. An analyst looking at a spike sees one thing, not one per transaction.
@@ -202,3 +202,63 @@ def time_to_detection(
                 bucket[f"median_{stem}"] = math.inf
                 bucket[f"p90_{stem}"] = math.inf
     return by_scenario
+
+
+# --- vectorised sweep support ------------------------------------------------
+#
+# The threshold sweep evaluates 60 operating points. Doing that with the
+# per-event Python loops above cost ~100s per sweep on a 100-day stream, which
+# dominated `make eval`. These two functions compute the same quantities with
+# numpy, and `tests/test_eval.py` asserts they agree with the loops rather than
+# assuming it - a fast path that quietly disagrees with the reference would be
+# worse than a slow one.
+
+
+class SweepPrecompute:
+    """Arrays derived once from the candidate events, reused for every threshold."""
+
+    __slots__ = (
+        "order", "scores", "labels", "amounts", "approved",
+        "group", "ts", "n",
+    )
+
+    def __init__(self, events: list[Event], scores: np.ndarray):
+        # Sorted by (merchant, bin, ts) so alert runs are contiguous.
+        groups = {}
+        codes = np.empty(len(events), dtype=np.int64)
+        for i, event in enumerate(events):
+            key = (event.merchant_id, event.bin)
+            code = groups.get(key)
+            if code is None:
+                code = len(groups)
+                groups[key] = code
+            codes[i] = code
+
+        ts = np.array([e.ts for e in events], dtype=np.int64)
+        self.order = np.lexsort((ts, codes))
+        self.group = codes[self.order]
+        self.ts = ts[self.order]
+        self.scores = scores[self.order]
+        self.labels = np.array([e.label for e in events], dtype=np.int64)[self.order]
+        self.amounts = np.array([e.amount_paise for e in events], dtype=np.float64)[self.order]
+        self.approved = np.array(
+            [e.status == STATUS_APPROVED for e in events], dtype=bool
+        )[self.order]
+        self.n = len(events)
+
+
+def alert_count_at(pre: "SweepPrecompute", threshold: float) -> int:
+    """Number of distinct alerts, vectorised.
+
+    An alert starts at a flagged event whose previous flagged event is either in
+    a different (merchant, BIN) group or more than the cooldown earlier.
+    """
+    mask = pre.scores > threshold
+    if not mask.any():
+        return 0
+    group = pre.group[mask]
+    ts = pre.ts[mask]
+    starts = np.empty(len(ts), dtype=bool)
+    starts[0] = True
+    starts[1:] = (group[1:] != group[:-1]) | ((ts[1:] - ts[:-1]) > ALERT_COOLDOWN_MS)
+    return int(starts.sum())

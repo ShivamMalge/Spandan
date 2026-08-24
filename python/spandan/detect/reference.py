@@ -118,6 +118,9 @@ class EntityState:
         "events",
         "declines_in_window",
         "amount_sum",
+        "card_counts",
+        "merchant_counts",
+        "track_distinct",
         "baseline_count",
         "baseline_declines",
         "baseline_amount",
@@ -126,10 +129,22 @@ class EntityState:
         "saturated",
     )
 
-    def __init__(self, capacity: int, halflife: float) -> None:
+    def __init__(self, capacity: int, halflife: float, track_distinct: bool = True) -> None:
         self.events: deque = deque(maxlen=capacity)
         self.declines_in_window = 0
         self.amount_sum = 0.0
+        # Distinct-entity counts maintained incrementally rather than recomputed
+        # from the window on every event. Two reasons: rebuilding a set per event
+        # made scoring O(window) and dominated the runtime, and the Rust core in
+        # Phase 3 has to be O(1) amortised anyway - so the reference should
+        # specify the algorithm the port is expected to implement, not a slower
+        # one that happens to give the same answer.
+        # Only the BIN axis reads these, so only the BIN axis pays for them.
+        # Maintaining them on all four axes cost ~30% of scoring throughput to
+        # answer a question three of the axes never ask.
+        self.track_distinct = track_distinct
+        self.card_counts: dict[str, int] = {}
+        self.merchant_counts: dict[str, int] = {}
         self.baseline_count = Welford()
         self.baseline_declines = Welford()
         self.baseline_amount = Welford()
@@ -137,25 +152,37 @@ class EntityState:
         self.last_baseline_ms = -(1 << 62)
         self.saturated = False
 
+    def _forget(self, row: tuple) -> None:
+        _, declined, amount, card, merchant = row
+        self.declines_in_window -= int(declined)
+        self.amount_sum -= amount
+        if not self.track_distinct:
+            return
+        for table, key in ((self.card_counts, card), (self.merchant_counts, merchant)):
+            remaining = table[key] - 1
+            if remaining:
+                table[key] = remaining
+            else:
+                del table[key]
+
     def push(self, ts: int, declined: bool, amount: float, card: str, merchant: str) -> None:
         if len(self.events) == self.events.maxlen:
             # Ring is full: the oldest retained event is about to be evicted by
             # the deque itself. Account for it, and record that this entity hit
             # its capacity bound rather than pretending the window is exact.
-            old = self.events[0]
-            self.declines_in_window -= int(old[1])
-            self.amount_sum -= old[2]
+            self._forget(self.events[0])
             self.saturated = True
         self.events.append((ts, declined, amount, card, merchant))
         self.declines_in_window += int(declined)
         self.amount_sum += amount
+        if self.track_distinct:
+            self.card_counts[card] = self.card_counts.get(card, 0) + 1
+            self.merchant_counts[merchant] = self.merchant_counts.get(merchant, 0) + 1
 
     def evict_before(self, cutoff_ms: int) -> None:
         """Drop everything at or before `cutoff`. Window is (t - W, t]."""
         while self.events and self.events[0][0] <= cutoff_ms:
-            _, declined, amount, _, _ = self.events.popleft()
-            self.declines_in_window -= int(declined)
-            self.amount_sum -= amount
+            self._forget(self.events.popleft())
 
     def fold_baseline(self, ts: int, interval_ms: int) -> None:
         """Fold the current window into the baseline, at most once per interval.
@@ -191,7 +218,11 @@ class ReferenceDetector(Detector):
         key = (axis, value)
         state = self._state.get(key)
         if state is None:
-            state = EntityState(self.config.ring_capacity, self.config.ewma_halflife_samples)
+            state = EntityState(
+                self.config.ring_capacity,
+                self.config.ewma_halflife_samples,
+                track_distinct=(axis == "bin"),
+            )
             self._state[key] = state
         return state
 
@@ -222,8 +253,7 @@ class ReferenceDetector(Detector):
     def _score(self, event: Event, axis_states: dict[str, EntityState]) -> tuple[float, dict]:
         cfg = self.config
         bin_state = axis_states["bin"]
-        window = list(bin_state.events)
-        count = len(window)
+        count = len(bin_state.events)
 
         decline_ratio = bin_state.declines_in_window / count if count else 0.0
         baseline_decline = (
@@ -238,8 +268,8 @@ class ReferenceDetector(Detector):
             else 0.0
         )
 
-        distinct_cards = len({row[3] for row in window})
-        distinct_merchants = len({row[4] for row in window})
+        distinct_cards = len(bin_state.card_counts)
+        distinct_merchants = len(bin_state.merchant_counts)
         cards_per_event = distinct_cards / count if count else 1.0
 
         warm = bin_state.baseline_count.count >= cfg.baseline_min_samples or not cfg.use_ewma

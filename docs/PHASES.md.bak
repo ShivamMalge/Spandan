@@ -178,10 +178,6 @@ NumPy baseline.
   (Cut from four on Aug 24, pulled forward from the Sep 1 decision point to fund
   the issuer-outage control. Drop-Welford and drop-per-device are gone; these two
   are the ones a payments panel actually asks about.)
-- **Detection speed leads the report.** Episodes caught, and median/p90 events
-  and rupees elapsed before the first flag, printed *before* precision and recall.
-  For a spike detector this is the number closest to the product: attempt 40 and
-  attempt 400 are both recall = 1 and are not the same outcome.
 - **Precision at a stated prevalence, not only at the generator's.** Recall is
   prevalence-independent; precision is not, and the generator's ~1.4% positive
   rate is far above a real merchant card-testing rate. So the harness reweights
@@ -704,35 +700,6 @@ constraint on this build. Consequences:
   at all.
 - The binding constraint is therefore the calendar and the review cycle, not hours
   available. That makes the cut list, not the clock, the thing to watch.
-
-## Fourth review pass — Aug 24, after Phase 2
-
-Phase 2 gated with seven follow-ups, all applied before Phase 3 starts:
-
-1. **Regenerated with 20+ episodes per scenario per split** (240 episodes, up from
-   25). Achieved by extending the stream from 14 days to **100** (train 50 / test
-   50) at an unchanged episode rate per day, never by densifying — densifying
-   would fold more attack traffic into the baselines attacks are measured against.
-   `test_more_episodes_came_from_a_longer_stream_not_a_denser_one` asserts the
-   density is unchanged so this cannot drift.
-2. **Ablations now run on every seed.** Phase 2's ablations were single-seed,
-   which was the gap in that report: a rupee gap measured on one stream cannot be
-   told apart from the stream disfavouring one variant. `run_seed_matrix` runs
-   every variant on every seed and the report gives medians with [min, max] plus
-   a paired per-seed delta.
-3. **README framing deferred** until the multi-seed ablation result is in, per
-   review. When written it states both sides — the cost model prefers the simpler
-   detector; alert volume is a different product because linear review cost
-   understates alert fatigue — recommends one, and shows the numbers for each. It
-   does not resolve into a component being vindicated.
-4. **Headroom stays printed next to precision permanently**, and now says so
-   explicitly when it goes negative rather than calling it "narrow".
-5. **`outage_single_merchant` added** — the single-merchant outage with
-   attack-like amounts, which removes the two separators the detector was
-   actually using. See `gen/ASSUMPTIONS.md` §1.7c.
-6. **Both Phase 2 deviations approved** (brute-force average precision; runtime
-   card-novelty test).
-7. **Detection speed now leads the metrics section**, ahead of precision/recall.
 
 ## Third review pass — Aug 24, after Phase 1
 

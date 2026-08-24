@@ -18,12 +18,13 @@ from spandan.detect import DetectorConfig
 from spandan.eval import metrics
 from spandan.eval.costs import CostModel, compute_costs, reweight_to_prevalence
 from spandan.eval.harness import (
+    VARIANTS,
     evaluate,
-    run_ablations,
-    run_multiseed,
+    score_split_once,
     score_with_warmup,
     select_threshold,
     sweep_thresholds,
+    variant_config,
 )
 from spandan.eval.loader import NonTemporalSplitError, build_split, load_split
 from spandan.gen.build import build
@@ -397,21 +398,59 @@ def test_ablation_toggle_changes_active_feature_set(built):
     assert not np.array_equal(full, no_ip), "drop-per-IP changed nothing"
 
 
-def test_exactly_two_ablations_are_run(built):
+def test_exactly_two_ablations_are_run():
     """Cut from four to two on Aug 24 to fund the issuer-outage control."""
-    split = built["split"]
-    rows = run_ablations(split, DetectorConfig(), CostModel.load(), 0.0)
-    names = [row["name"] for row in rows]
-    assert names == ["full", "drop-EWMA", "drop-per-IP"]
+    assert VARIANTS == ("full", "drop-EWMA", "drop-per-IP")
 
 
-def test_multi_seed_spread_reported_for_all_headline_metrics():
-    rows = run_multiseed(2, SMALL_CONFIG.seed, DetectorConfig(), CostModel.load())
-    assert len(rows) == 2
-    assert rows[0]["seed"] != rows[1]["seed"]
+def test_each_variant_actually_differs_from_full():
+    base = DetectorConfig()
+    assert variant_config("full", base) == base
+    assert variant_config("drop-EWMA", base).use_ewma is False
+    assert variant_config("drop-per-IP", base).use_per_ip is False
+
+
+def test_multi_seed_spread_reported_for_all_headline_metrics(built):
+    """The seed matrix must carry every headline metric, per seed AND per variant.
+
+    Phase 2 reported ablations on one stream only; that gap is what this asserts
+    against. A rupee gap between variants measured on a single stream cannot be
+    distinguished from the stream disfavouring one of them.
+    """
+    from spandan.eval.harness import run_seed_matrix
+
+    rows = run_seed_matrix(2, SMALL_CONFIG.seed, DetectorConfig(), CostModel.load())
+
+    seeds = {row["seed"] for row in rows}
+    variants = {row["variant"] for row in rows}
+    assert len(seeds) == 2
+    assert variants == set(VARIANTS), "every ablation must run on every seed"
+    assert len(rows) == 2 * len(VARIANTS)
+
     for row in rows:
-        for key in ("precision", "recall", "pr_auc", "net_rupees", "alerts_per_day", "threshold"):
-            assert key in row, f"multi-seed row is missing {key}"
+        for key in (
+            "precision", "recall", "pr_auc", "net_rupees",
+            "alerts_per_day", "threshold", "headroom_pct",
+        ):
+            assert key in row, f"seed-matrix row is missing {key}"
+
+
+def test_single_pass_matches_two_pass_scoring(built):
+    """The optimisation that halved evaluation runtime, asserted not assumed.
+
+    Feeding warmup -> validation -> test through one detector must give exactly
+    the scores that two separately warmed passes give. Easy to get subtly wrong,
+    impossible to notice afterwards.
+    """
+    split = built["split"]
+    config = DetectorConfig()
+
+    one_validation, one_test = score_split_once(split, config)
+    two_validation = score_with_warmup(split.train_warmup, split.validation, config)
+    two_test = score_with_warmup(split.train, split.test, config)
+
+    assert np.array_equal(one_validation, two_validation)
+    assert np.array_equal(one_test, two_test)
 
 
 def test_evaluate_reports_the_separation_margin(built):
@@ -425,3 +464,54 @@ def test_evaluate_reports_the_separation_margin(built):
     assert margin["headroom"] == pytest.approx(
         margin["threshold"] - margin["highest_clean_score"]
     )
+
+
+# --- the vectorised sweep must agree with the reference loops ----------------
+
+
+def test_vectorised_sweep_agrees_with_the_per_event_loops(built):
+    """A fast path that quietly disagrees with the reference is worse than a slow one.
+
+    The sweep evaluates 60 operating points; doing that with the per-event Python
+    loops cost ~100s per sweep on the 100-day stream and dominated `make eval`.
+    The vectorised versions must produce identical alert counts and identical
+    gross rupee positions, not merely similar ones.
+    """
+    from spandan.eval.costs import gross_at
+
+    split = built["split"]
+    events = split.validation
+    scores = score_with_warmup(split.train_warmup, events, DetectorConfig())
+    model = CostModel.load()
+
+    pre = metrics.SweepPrecompute(events, scores)
+    lo, hi = float(np.percentile(scores, 60.0)), float(scores.max())
+
+    checked = 0
+    for threshold in np.linspace(lo, hi, 12):
+        vector_alerts = metrics.alert_count_at(pre, threshold)
+        loop_alerts = len(metrics.alerts(events, scores, threshold))
+        assert vector_alerts == loop_alerts, f"alert count differs at {threshold:.3f}"
+
+        vector_gross = gross_at(pre, threshold, model)
+        loop_gross = compute_costs(events, scores, threshold, model, loop_alerts).gross_paise
+        assert vector_gross == pytest.approx(loop_gross, rel=1e-9, abs=1e-6), (
+            f"gross differs at {threshold:.3f}"
+        )
+        checked += 1
+    assert checked == 12
+
+
+def test_every_negative_control_appears_in_the_false_positive_table():
+    """The single-merchant control was added and silently missed the FP table.
+
+    It was the worst offender at the time - 10,759 false positives - and the
+    table printed only the two hand-written rows. Driving the table from
+    NEGATIVE_CONTROLS fixes that; this asserts the mapping stays complete, so the
+    next control added cannot go unreported.
+    """
+    from spandan.eval.harness import CONTROL_AXES
+    from spandan.gen.schema import NEGATIVE_CONTROLS
+
+    missing = [name for name in NEGATIVE_CONTROLS if name not in CONTROL_AXES]
+    assert not missing, f"negative controls missing from the FP cost table: {missing}"

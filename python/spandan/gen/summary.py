@@ -47,12 +47,12 @@ def render(manifest: dict) -> None:
         )
 
     _rule("rows per scenario (positives in brackets)")
-    print(f"{'scenario':<14}{'train':>18}{'test':>18}")
+    print(f"{'scenario':<26}{'train':>14}{'test':>14}")
     for name in SCENARIOS:
         marker = "*" if name in ATTACK_SCENARIOS else " "
         train_cell = f"{manifest['train']['scenario_counts'][name]} [{manifest['train']['scenario_positives'][name]}]"
         test_cell = f"{manifest['test']['scenario_counts'][name]} [{manifest['test']['scenario_positives'][name]}]"
-        print(f"{marker} {name:<12}{train_cell:>18}{test_cell:>18}")
+        print(f"{marker} {name:<24}{train_cell:>14}{test_cell:>14}")
     print("  * = labeled 1. flash_sale is a labeled-clean volume surge: the false-positive test.")
 
     _rule("entity cardinalities")
