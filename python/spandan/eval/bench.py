@@ -115,13 +115,24 @@ def bench_batches(events: list[Event]) -> list[dict]:
         for engine in ("python", "rust"):
             detector = make_detector(engine, DetectorConfig())
             # Warm state so we measure steady-state scoring, not dict growth.
-            detector.score_batch(events[: min(50_000, len(events))])
+            warm = min(50_000, len(events))
+            detector.score_batch(events[:warm])
 
-            chunk = events[50_000 : 50_000 + size] if len(events) > 50_000 + size else events[:size]
-            # Enough repetitions for a stable clock reading at small sizes.
+            # Each repetition walks a FRESH, disjoint chunk. The first version of
+            # this benchmark re-scored the same chunk every repeat, which at
+            # batch=1 measured re-scoring one hot event - one warm entity, cache-
+            # resident dicts, nothing evicting - and under-measured the Python
+            # baseline by ~2x (13.8us vs 29.8us on fresh events). The tell was in
+            # its own table: batch=1 came out FASTER per event than batch=100k,
+            # and the streaming bench, which does walk fresh events, disagreed.
+            # An unexpectedly good baseline deserves the same suspicion as an
+            # unexpectedly good precision number.
             repeats = max(3, min(400, 20_000 // size))
+            available = (len(events) - warm) // size
+            repeats = min(repeats, max(available, 1))
             timings = []
-            for _ in range(repeats):
+            for r in range(repeats):
+                chunk = events[warm + r * size : warm + (r + 1) * size]
                 t0 = time.perf_counter()
                 detector.score_batch(chunk)
                 timings.append(time.perf_counter() - t0)

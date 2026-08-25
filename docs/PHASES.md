@@ -516,9 +516,14 @@ walk the architecture in five minutes.
      a commit timestamp, so cite the commit.
   4. **Precision at a realistic base rate leads**, not precision at the
      generator's rate.
-  5. **The two retractions, framed as a pattern** — see `docs/BUILD_LOG.md`. Not
-     two anecdotes: the same habit of measuring a load-bearing number a second way
-     before believing it.
+  5. **The plausible-number pattern, framed as one story** — see the final
+     `docs/BUILD_LOG.md` entry. Four instances of the same failure class, a
+     plausible figure with nothing behind it: single-seed precision 1.00, a
+     bit-exact fixture that never filled a ring buffer, 0.0MB RSS from an
+     unchecked Win32 call, and a batch=1 benchmark that re-scored one hot event.
+     Same cure every time — measure the measurement before believing it. This is
+     the walkthrough's spine, not four separate anecdotes; the two retractions
+     (EWMA, coarse-grid) are the same habit applied to results.
   6. **Parity, framed correctly (walkthrough candidate).** The escape hatch going
      unused is evidence the paperwork was the work, not that the risk was
      overstated: bit-exact agreement was bought by writing the (t−W, t] window
@@ -532,12 +537,15 @@ walk the architecture in five minutes.
      card-novelty ban is a compile error in the Rust core, a test failure in
      Python, and a promise in the docs — three enforcement strengths, and the
      type system's is the strongest.
-  8. **The memory claim, stated precisely.** Bounded per entity, **linear in
-     distinct entity count** — never "bounded memory" unqualified. Quote the
-     measured slope (3,874 bytes/entity Rust, 1,975 Python) and the monthly
-     projection (31 GB / 16 GB at an assumed 8M entities), and point at the
-     unbuilt fix in FAILURE_MODES §7. A systems panelist catches an unqualified
-     bounded-memory claim instantly, and the measurement is already made.
+  8. **The Rust trade, win and cost in the same sentence.** Close to verbatim:
+     *"Rust buys a 5.5× streaming throughput gain and a 4.8× better p99 (24.8µs
+     vs 119.3µs) at twice the memory per entity — 3,874 vs 1,975 bytes,
+     projecting 31 GB vs 16 GB per month at an assumed 8M distinct entities."*
+     Never the throughput table without the memory slope beside it. The memory
+     claim stays precise: bounded per entity, **linear in distinct entity
+     count**, never "bounded memory" unqualified, with the unbuilt fixes
+     (FAILURE_MODES §7: LRU/sketch for the growth, interning/right-sizing for
+     the 2× constant) one pointer away.
   9. **The Phase 4 engine swap is the real parity test, not a formality.**
      `make eval ENGINE=rust` vs `ENGINE=python` runs both cores over 1.6M events
      at full state depth. Divergence there after a bit-exact fixture means the

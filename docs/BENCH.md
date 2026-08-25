@@ -39,25 +39,40 @@ none.
 
 | batch | engine | events/s | µs/event |
 |---|---|---|---|
-| 1 | python | 40,816 | 24.50 |
-| 1 | **rust** | 64,516 | 15.50 |
-| 10 | python | 39,944 | 25.03 |
-| 10 | **rust** | 155,885 | 6.41 |
-| 100 | python | 35,984 | 27.79 |
-| 100 | **rust** | 113,295 | 8.83 |
-| 1,000 | python | 33,045 | 30.26 |
-| 1,000 | **rust** | 116,450 | 8.59 |
-| 10,000 | python | 32,290 | 30.97 |
-| 10,000 | **rust** | 94,143 | 10.62 |
-| 100,000 | python | 33,866 | 29.53 |
-| 100,000 | **rust** | 102,037 | 9.80 |
+| 1 | python | 35,026 | 28.55 |
+| 1 | **rust** | 52,910 | 18.90 |
+| 10 | python | 39,262 | 25.47 |
+| 10 | **rust** | 152,788 | 6.54 |
+| 100 | python | 37,623 | 26.58 |
+| 100 | **rust** | 179,872 | 5.56 |
+| 1,000 | python | 39,655 | 25.22 |
+| 1,000 | **rust** | 180,138 | 5.55 |
+| 10,000 | python | 36,895 | 27.10 |
+| 10,000 | **rust** | 162,389 | 6.16 |
+| 100,000 | python | 38,857 | 25.74 |
+| 100,000 | **rust** | 157,952 | 6.33 |
 
-**Rust wins every batch size measured, including batch=1** (1.6× there, 3–4×
-elsewhere). The plan required at least one row where the reference wins or ties;
-that row did not materialise on this machine, and saying so honestly is the
-requirement — the closest regime is batch=1, where per-call overhead (kwargs,
-columnarisation of a single event, FFI) eats most of Rust's advantage. On a
-slower FFI or a faster CPython that row could plausibly flip.
+**These are corrected figures; the first published table was wrong in both
+directions.** The Phase 4 gate asked whether 40,816 ev/s of per-event Python was
+too good to be true, and it was: the original benchmark re-scored the *same*
+chunk every repetition, so batch=1 measured re-scoring one hot event — one warm
+entity, cache-resident dicts, nothing evicting — and under-measured the Python
+baseline by ~2× (13.8µs same-chunk vs 29.8µs fresh events, verified directly).
+The tell was in the table itself: batch=1 came out faster per event than
+batch=100k, and the streaming bench, which walks fresh events, disagreed. The
+same flaw *inflated* Rust's mid-size rows: repeated chunks stacked duplicate
+events into windows and made them artificially long (8.6µs → 5.6µs corrected).
+Each repetition now walks a fresh, disjoint chunk.
+
+The correction cuts against Rust at batch=1 in relative terms (1.5× rather than
+1.6×) and for it at mid sizes (4–5× rather than 3–4×); it was made because the
+number was wrong, not because of which way it pointed.
+
+**Rust wins every batch size measured, including batch=1.** The plan required at
+least one row where the reference wins or ties; that row did not materialise on
+this machine, and saying so honestly is the requirement — the closest regime is
+batch=1, where per-call overhead (kwargs, columnarisation of a single event,
+FFI) eats most of Rust's advantage.
 
 "Zero-copy" in these numbers means the **numeric columns** (timestamps, amounts,
 declined flags) are borrowed from NumPy without copying. The six identifier
@@ -117,8 +132,13 @@ memory", and 31 GB/month says how often that is.
 
 ## 5. Which regime favours which
 
+**The trade in one sentence: Rust buys a 5.5× streaming throughput gain and a
+4.8× better p99 (24.8µs vs 119.3µs) at twice the memory per entity (3,874 vs
+1,975 bytes, projecting 31 GB vs 16 GB per month at 8M entities).** Both halves
+are measured; neither is the whole story alone.
+
 - **Rust**: every throughput regime measured, most decisively streaming (5.5×,
-  p99 < 25µs) and mid-size batches (3–4×). The case for the port is latency and
+  p99 < 25µs) and mid-size batches (4–5×). The case for the port is latency and
   headroom, and it is real.
 - **Python reference**: memory (½ the per-entity cost), inspectability (rich
   `Flag` evidence on every update; the Rust surface returns scores), and being

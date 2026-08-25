@@ -197,3 +197,34 @@ The zeros would have shipped inside a table whose other columns were honest,
 which is the most credible possible disguise. The ok-check existed for one run
 before it caught this; it earned its place immediately - same pattern as the
 multi-seed check in Phase 2.
+
+## 2026-08-24 — the batch=1 benchmark measured re-scoring one hot event
+**Phase:** 4 (gate follow-up)
+**Symptom:** none, and that is the point. 40,816 ev/s of per-event Python looked
+like a strong, credible baseline. The Phase 4 gate applied the project's own
+standard in the uncomfortable direction — an unexpectedly GOOD baseline deserves
+the same suspicion as an unexpectedly good precision number — and asked for
+verification. Note the incentive gradient: a slower honest baseline makes Rust
+look better, so this error was flattering the comparison's loser and nobody
+inside the project had a reason to catch it.
+**First believed:** the number was real; CPython at ~25us/event over warm dicts
+did not seem impossible.
+**Actually wrong:** the benchmark re-scored the SAME chunk every repetition. At
+batch=1 that measures one hot event against one warm entity - cache-resident
+dicts, nothing evicting - and under-measures fresh-event work by ~2x (13.8us
+same-chunk vs 29.8us fresh, verified directly). The tell was in the table
+itself: batch=1 came out FASTER per event than batch=100k, and the streaming
+bench, which does walk fresh events, disagreed at 46us. The same flaw distorted
+the other engine the other way: repeated chunks stacked duplicate events into
+windows, inflating Rust's mid-size per-event cost (8.6us -> 5.6us corrected).
+**Fix:** every repetition walks a fresh, disjoint chunk. Corrected table in
+docs/BENCH.md with the original marked wrong in both directions.
+**Proved by:** batch=1 python 28.55us, now consistent with both the large-batch
+rows (25-27us) and the streaming path; the faster-than-bulk anomaly is gone.
+**The pattern, fourth instance:** a plausible number with nothing behind it.
+(1) single-seed precision 1.00 - caught by the multi-seed check; (2) bit-exact
+parity on a fixture that never filled a ring - caught by coverage measurement;
+(3) 0.0MB RSS from an unchecked Win32 call - caught by checking the return
+value; (4) this. Same failure class every time, and the same cure: measure the
+measurement before believing it. This is the walkthrough's spine, not four
+separate anecdotes.

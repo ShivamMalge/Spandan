@@ -617,4 +617,16 @@ Ordered by how much they change the credibility of the submission:
    precision — the error is one-sided in the unsafe direction). Both are design
    changes to frozen state machinery. Until one exists the deployment statement
    is "restart or shard before the entity table exceeds memory."
+
+   **The Rust-vs-Python 2× gap itself is closable, and here is how.** Two causes,
+   both addressable: the ring pre-allocates 64 slots per entity (a churn entity
+   that sees one event pays for 64), and each retained slot owns two heap
+   `String`s where Python shares references. The fixes are mechanical — grow the
+   ring from zero, and intern entity identifiers to `u64` handles in a
+   per-detector table so slots store 8-byte ids instead of owned strings; the
+   second also speeds up every hash lookup. Estimated to bring Rust at or below
+   Python's 1,975 bytes/entity. Not done because both touch frozen state
+   machinery mid-schedule for a constant factor, while the O(entities) growth —
+   the actual deployment blocker — is untouched by either. Closing a 2× constant
+   on an unbounded curve is polish, not the fix.
 6. **Persist baselines across restarts** to remove the cold-start failure (§2.3).
