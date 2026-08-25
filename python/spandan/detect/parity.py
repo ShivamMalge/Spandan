@@ -125,6 +125,45 @@ def serialise(fixture: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def serialise_tsv(fixture: dict) -> str:
+    """The same fixture in a format Rust can read with `std` alone.
+
+    PHASES.md Phase 3 approves exactly one new Rust crate — `proptest` — and says
+    "nothing else". A JSON fixture would need `serde_json` to read, so rather than
+    spend the project's one dependency request on a test reader, or hand-roll a
+    JSON parser (fragile, and precisely the kind of thing a reviewer should
+    question), the same builder emits a tab-separated twin.
+
+    `parity.json` remains the canonical committed artifact named in the plan and
+    is what a human reads. `parity.tsv` is derived from the identical `build_fixture`
+    output, and `test_parity_json_and_tsv_agree` asserts they carry the same data,
+    so the two cannot drift.
+
+    Layout, chosen so the Rust reader is a `split('\\t')` and nothing more:
+
+        tolerance <TAB> 1e-09
+        config    <TAB> window_ms=300000 <TAB> ring_capacity=512 <TAB> ...
+        columns   <TAB> ts <TAB> txn_id <TAB> ... <TAB> expected_score
+        <one event per line, fields in `columns` order, score last>
+    """
+    config = fixture["detector_config"]
+    lines = [
+        f"tolerance\t{fixture['tolerance']!r}",
+        "config\t" + "\t".join(f"{k}={_tsv_scalar(v)}" for k, v in sorted(config.items())),
+        "columns\t" + "\t".join(fixture["feature_columns"]) + "\texpected_score",
+    ]
+    for row, score in zip(fixture["events"], fixture["expected_scores"]):
+        cells = [str(value) for value in row]
+        lines.append("\t".join(cells) + "\t" + repr(score))
+    return "\n".join(lines) + "\n"
+
+
+def _tsv_scalar(value) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return repr(value) if isinstance(value, float) else str(value)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Write the Rust parity fixture.")
     parser.add_argument("--out", default=str(FIXTURE_PATH))
@@ -138,20 +177,24 @@ def main(argv: list[str] | None = None) -> int:
     fixture = build_fixture()
     payload = serialise(fixture)
     out = Path(args.out)
+    tsv_out = out.with_suffix(".tsv")
+    tsv_payload = serialise_tsv(fixture)
 
     if args.check:
-        if not out.exists():
-            print(f"{out} does not exist")
-            return 1
-        if out.read_text(encoding="utf-8") != payload:
-            print(f"{out} is STALE - the reference detector has changed since it was written")
-            return 1
-        print(f"{out} is current ({len(fixture['events'])} events)")
+        for path, expected in ((out, payload), (tsv_out, tsv_payload)):
+            if not path.exists():
+                print(f"{path} does not exist")
+                return 1
+            if path.read_text(encoding="utf-8") != expected:
+                print(f"{path} is STALE - the reference detector changed since it was written")
+                return 1
+        print(f"{out} and {tsv_out} are current ({len(fixture['events'])} events)")
         return 0
 
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(payload, encoding="utf-8")
-    print(f"wrote {out}  ({len(fixture['events'])} events, tolerance {TOLERANCE:g})")
+    tsv_out.write_text(tsv_payload, encoding="utf-8")
+    print(f"wrote {out} and {tsv_out}  ({len(fixture['events'])} events, tolerance {TOLERANCE:g})")
     print(f"detector window_ms={fixture['detector_config']['window_ms']} "
           f"ring_capacity={fixture['detector_config']['ring_capacity']}")
     return 0

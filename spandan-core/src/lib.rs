@@ -1,26 +1,47 @@
-//! spandan-core — Phase 0 skeleton.
+//! spandan-core — the deterministic streaming detector core.
 //!
-//! There is no detector logic here yet. The five modules named in PHASES.md
-//! Phase 3 (`ingest`, `state`, `velocity`, `baseline`, `score`) are out of scope
-//! until that phase is handed over.
+//! Five modules, in the order an event flows through them:
 //!
-//! `_smoke_add` exists for exactly one reason: to prove that the
-//! PyO3 / maturin / abi3-py310 toolchain builds and imports on this machine
-//! before anything depends on it. **It is deleted in Phase 3**, which asserts its
-//! absence with a grep.
+//! | stage | module | responsibility |
+//! |---|---|---|
+//! | 1 | [`ingest`]   | untyped input becomes a typed [`ingest::Event`] |
+//! | 2 | [`state`]    | per-entity state, keyed by (axis, id) |
+//! | 3 | [`velocity`] | fixed-capacity sliding windows and their aggregates |
+//! | 4 | [`baseline`] | Welford and EWMA baselines, fed on a sample gate |
+//! | 5 | [`score`]    | evidence terms minus damping terms |
+//!
+//! There is no sixth module, by decision rather than by omission.
+//!
+//! ## Parity
+//!
+//! This core is a port of `python/spandan/detect/reference.py`, which is frozen
+//! for the duration of Phase 3 and is the specification. `tests/parity.rs`
+//! replays a committed fixture of that reference's scores and requires agreement
+//! to a stated tolerance. The Python side is the authority; where this core and
+//! the reference disagree, this core is wrong.
+//!
+//! ## Defense-only
+//!
+//! This is a detector. It consumes transaction records and emits scores and
+//! evidence. It contains nothing that generates, mutates, or replays payment
+//! traffic.
+
+pub mod baseline;
+pub mod ingest;
+pub mod score;
+pub mod state;
+pub mod velocity;
+
+pub use ingest::{Event, Status};
+pub use score::{Contributions, Detector, DetectorConfig, Flag};
+pub use state::Axis;
 
 use pyo3::prelude::*;
 
-/// Toolchain smoke test. Deleted in Phase 3 — see PHASES.md.
-#[pyfunction]
-#[allow(non_snake_case)]
-fn _smoke_add(a: i64, b: i64) -> i64 {
-    a + b
-}
-
+/// The PyO3 surface is built out in Phase 4. The Phase 0 toolchain probe has
+/// been deleted, as PHASES.md Phase 3 requires.
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
-    m.add_function(wrap_pyfunction!(_smoke_add, m)?)?;
     Ok(())
 }

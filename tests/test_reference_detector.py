@@ -335,6 +335,58 @@ def test_parity_fixture_is_current():
     )
 
 
+def test_parity_fixture_is_current_tsv():
+    """The TSV twin the Rust test reads must be as fresh as the JSON.
+
+    cargo test replays parity.tsv, not parity.json; a stale TSV would let the
+    Rust core pass parity against an old reference while the JSON said otherwise.
+    """
+    from spandan.detect import parity
+
+    tsv_path = Path(__file__).resolve().parent / "fixtures" / "parity.tsv"
+    assert tsv_path.exists(), "tests/fixtures/parity.tsv is missing; cargo test reads it"
+
+    regenerated = parity.serialise_tsv(parity.build_fixture())
+    assert tsv_path.read_text(encoding="utf-8") == regenerated, (
+        "parity.tsv is stale relative to the frozen reference - regenerate with "
+        "`python -m spandan.detect.parity` and re-approve"
+    )
+
+
+def test_parity_json_and_tsv_agree():
+    """The two serialisations must carry identical data, so they cannot drift.
+
+    Promised in parity.py's docstring. The JSON is the canonical human-readable
+    artifact; the TSV exists because Phase 3 approved exactly one Rust crate
+    (proptest) and reading JSON would have needed serde_json.
+    """
+    import json
+
+    fixtures = Path(__file__).resolve().parent / "fixtures"
+    doc = json.loads((fixtures / "parity.json").read_text(encoding="utf-8"))
+
+    lines = (fixtures / "parity.tsv").read_text(encoding="utf-8").splitlines()
+    header = {line.split("	")[0]: line.split("	")[1:] for line in lines[:3]}
+    rows = [line.split("	") for line in lines[3:]]
+
+    assert float(header["tolerance"][0]) == doc["tolerance"]
+    assert header["columns"][:-1] == doc["feature_columns"]
+    assert header["columns"][-1] == "expected_score"
+    assert len(rows) == len(doc["events"]) == len(doc["expected_scores"])
+
+    for tsv_row, json_row, score in zip(rows, doc["events"], doc["expected_scores"]):
+        assert tsv_row[:-1] == [str(v) for v in json_row]
+        assert float(tsv_row[-1]) == score
+
+    config = dict(cell.split("=", 1) for cell in header["config"])
+    for key, value in doc["detector_config"].items():
+        assert key in config, f"TSV config is missing {key}"
+        if isinstance(value, bool):
+            assert config[key] == ("true" if value else "false")
+        else:
+            assert float(config[key]) == float(value)
+
+
 def test_parity_fixture_carries_no_labels():
     """The Rust core never sees labels, so its contract must not contain them."""
     import json

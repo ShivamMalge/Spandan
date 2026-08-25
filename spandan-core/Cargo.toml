@@ -14,6 +14,16 @@ crate-type = ["cdylib", "rlib"]
 # abi3-py310: one forward-compatible wheel for Python 3.10+.
 pyo3 = { version = "0.28", features = ["abi3-py310", "extension-module"] }
 
-# No other dependencies. Phase 3 requests `proptest` as a dev-dependency and
-# nothing else; SIMD crates, custom hash maps, custom allocators, and rayon are
-# cut by decision (agents.md section 8, PHASES.md Phase 3).
+# No other runtime dependencies. SIMD crates, custom hash maps, custom
+# allocators and rayon are cut by decision (agents.md section 8, PHASES.md
+# Phase 3), not by schedule.
+
+[dev-dependencies]
+# The one new crate Phase 3 asked for. Test-only: it is not linked into the
+# wheel. The parity fixture is read with `std` alone - see tests/parity.rs for
+# why that avoided a second dependency request.
+proptest = "1"
+
+[[test]]
+name = "parity"
+harness = true

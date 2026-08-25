@@ -16,6 +16,7 @@ def test_rust_extension_imports_and_reports_version():
     assert spandan_core.__version__ == "0.1.0"
 
 
-def test_smoke_add_crosses_the_pyo3_boundary():
-    # Deleted in Phase 3 along with the function it exercises.
-    assert spandan_core._smoke_add(2, 3) == 5
+def test_the_phase_0_toolchain_probe_is_gone():
+    # _smoke_add existed to prove the PyO3/maturin toolchain and PHASES.md
+    # Phase 3 deletes it. Its absence is part of the phase's acceptance.
+    assert not hasattr(spandan_core, "_smoke_add")
