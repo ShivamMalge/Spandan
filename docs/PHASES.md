@@ -490,7 +490,33 @@ spandan explain --flag-id <id>            # sample explanation pasted
 **Goal.** A fresh clone reproduces every number in the README, and a reviewer can
 walk the architecture in five minutes.
 
-**In scope.** `README.md` — the loss class and why it is unaddressed, architecture,
+**In scope.**
+- **README sentences that are required verbatim-ish, agreed at the Phase 2 gate.**
+  These are commitments, not suggestions; each exists because a reviewer asked
+  for it after finding the project had it both ways.
+
+  1. **What a flag does, in one sentence, early.** "A flag declines the
+     transaction; alerts are the human-facing grouping of those declines per
+     merchant and BIN, not a softer separate action." The README must not leave
+     this ambiguous — the cost model charges blocked-transaction value per event,
+     which is only coherent if flags block, while the operating point is
+     constrained on alerts per day, which is analyst workload. Say which.
+  2. **The decline rate on legitimate traffic, next to it.** An alerts/day budget
+     bounds the review queue and says nothing about merchant impact: at the
+     headline point ~20k flagged events collapse into ~487 alerts. Quote the
+     share of legitimate transactions declined and what that is as "1 in N".
+  3. **Why the operating point was not moved after seeing test numbers.** Close
+     to verbatim: *the alert budget was registered in `costs.toml` before the test
+     window was read, and its basis — what one analyst can work through — does not
+     depend on the results; tighter budgets score better on test, and moving it
+     now would be selecting on the test set.* This is a discipline claim backed by
+     a commit timestamp, so cite the commit.
+  4. **Precision at a realistic base rate leads**, not precision at the
+     generator's rate.
+  5. **The two retractions, framed as a pattern** — see `docs/BUILD_LOG.md`. Not
+     two anecdotes: the same habit of measuring a load-bearing number a second way
+     before believing it.
+ `README.md` — the loss class and why it is unaddressed, architecture,
 how to run, headline metrics **including the FP cost in rupees**, and limitations.
 Architecture diagram checked in as SVG or ASCII in `docs/`.
 `docs/FAILURE_MODES.md` finalized against final numbers. Final ablation table.

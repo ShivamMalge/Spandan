@@ -131,3 +131,42 @@ worse than a slow one.
 **Worth noting for Phase 4:** the instinct to blame the slowest-looking component
 was wrong by a factor of three. That is the argument for measuring before
 optimising, and it is the same discipline the Rust-vs-NumPy benchmark will need.
+
+## 2026-08-24 — two findings withdrawn on our own initiative: the pattern, not the incidents
+**Phase:** 2 (addendum) and the frontier fix
+**PITCH-VIDEO CANDIDATE — and this entry is the frame, not either individual bug.**
+
+Two results were reported, then retracted after further measurement. Neither was
+caught by a reviewer noticing an error; both were withdrawn because a check we ran
+ourselves showed the claim could not carry the weight put on it.
+
+**Retraction 1 — "the per-entity EWMA baseline is not carrying the signal."**
+Reported from a single stream, where dropping EWMA improved net position by
+₹17,159. Re-run across three seeds, the delta was ₹12,981 median with a range of
+[−₹43,496, +₹109,443], changing sign across streams. The finding was withdrawn.
+The opposite finding — that EWMA is vindicated — was **also refused**, because the
+same data cannot support it: full has the higher median but loses on one seed of
+three. The honest result is a null one, and it is reported as a null one.
+
+**Retraction 2 — "constraining the operating point improved precision 0.400 →
+0.487."** Measured on a 60-point threshold sweep. At 600 points the constrained
+pick inside the same budget moves to a different threshold with higher validation
+net that generalises worse, and the real improvement is 0.418 → 0.446. The coarse
+grid had happened to place the pick at a favourable threshold. Superseded figures
+are marked as superseded in `docs/FAILURE_MODES.md` rather than quietly swapped,
+so the diff shows what changed and why.
+
+**Why this is the pattern worth showing.** Both retractions came from the same
+habit: when a number is load-bearing, measure it a second way before believing it —
+more seeds, a finer grid, a property asserted about the output rather than the
+code. Three of this project's four significant corrections were found that way (the
+third being the Zipf flash-sale leak, which a property-asserting test caught and a
+code-mirroring test would have passed forever).
+
+The submission's argument is evidence over claims. A project that argues that and
+never withdraws anything has not tested the claim. These two are the evidence that
+it was applied to its own results, including the flattering ones.
+
+**Proved by:** `make eval` prints the paired per-seed ablation deltas with the
+verdict "NOT consistent across seeds", and the 600-point frontier alongside the
+superseded 60-point figures.

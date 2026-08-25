@@ -14,19 +14,76 @@ port has a stable parity spec. Phase 6 refreshes these numbers.
 ## The headline
 
 **Precision at a realistic merchant card-testing base rate (0.15%, assumed) is
-0.0956 — roughly nine false alarms for every true catch.**
+0.0824 — roughly eleven false alarms for every true catch.**
 
 That is the number a payments panel will look for, so it is the number this
-document and `make eval` both open with. Measured at the generator's own ~1.3%
-positive rate precision is 0.4867, and that figure flatters the detector by about
+document and `make eval` both open with. Measured at the generator's own 1.33%
+positive rate precision is 0.4462, and that figure flatters the detector by about
 an order of magnitude.
 
-Recall is 0.788, and every one of the 60 attack episodes in the test window is
-caught, at a median of 2 events and ₹65–95 exposed.
+**And a flag declines the transaction** (*What a flag does*, above), so the figure that decides
+deployability is not precision but the decline rate on legitimate traffic:
+**1.41%, or 1 in 71 legitimate customers.**
 
-The gap between those two sentences is the honest summary of where this project
-stands: it detects reliably and fast, and it costs too many false alarms to
-deploy as-is against the one failure mode described in §2.1.
+Against that: every one of the 60 attack episodes in the test window is caught,
+recall is 0.844, and the median episode is caught on its first or second event.
+
+The gap between those paragraphs is the honest summary of where this project
+stands: **it detects reliably and fast, and it is not deployable as an inline
+control**, because of the failure mode in §2.1 and the decline rate that follows
+from it. Both halves are measured; neither is softened.
+
+*(Figures throughout are from the 600-point threshold grid, seed 20260824, at the
+constrained operating point. An earlier 60-point grid gave slightly different and
+more flattering numbers; those are marked superseded where they appear.)*
+
+---
+
+## What a flag does, and why the answer changes how this document reads
+
+**A flag declines the transaction it is raised on.** It is an inline
+authorization control. Alerts are the human-facing grouping of those declines per
+(merchant, BIN) — the surface an analyst reviews — not a separate, softer action.
+
+This was ambiguous through Phase 2, and the ambiguity was load-bearing. The
+report constrained the operating point on **alerts per day**, which measures
+analyst workload, while the cost model charged blocked-transaction value **per
+event**, which is only coherent if flags block. Read one way, capping alerts
+looked like capping merchant impact. It is not, and the gap is not small:
+
+> At the headline operating point, **20,254 flagged events collapse into 487
+> alerts** — 42 events per alert. An alert budget bounds the review queue. It
+> says nothing about how many customers were declined.
+
+So the number that decides deployability is not alerts/day. It is the share of
+**legitimate** transactions the control declines:
+
+| budget | alerts/day | legitimate transactions declined | one in |
+|---|---|---|---|
+| 2 | 2.1 | **0.37%** | 271 |
+| 5 | 4.7 | 0.93% | 108 |
+| 10 (headline) | 9.7 | **1.41%** | **71** |
+| 50 | 18.3 | 1.62% | 62 |
+
+**At the headline operating point the detector declines roughly 1 in 71
+legitimate transactions.** Card-not-present false-decline rates in the industry
+already run at a few percent, so this is not a rounding error on top — it is a
+comparable amount again. **This detector is not deployable as an inline control
+at any alert budget**, and no tightening of the alert queue fixes it, because the
+alert queue was never what was hurting the merchant.
+
+Choosing the other reading was available: flags could notify only. That would be
+equally defensible in the abstract and it would invalidate **both** sides of the
+rupee model — nothing is prevented until a human acts, so neither the
+blocked-good cost nor the avoided-chargeback saving could be claimed without a
+response-time model this project does not have. The choice is recorded in
+`detect/interface.py` under "WHAT A FLAG DOES", so the code states its own
+semantics rather than leaving them to be inferred from the cost model.
+
+The consequence for everything below: **`declined` and `flag rate` are reported
+beside `alerts/day` everywhere either appears**, and the cost model's blocked-good
+and avoided-chargeback terms are correct as written, because both assume the
+attempt was stopped.
 
 ---
 
@@ -35,24 +92,38 @@ deploy as-is against the one failure mode described in §2.1.
 Nothing in this document should be read from a single stream. Every headline
 below is a median across three independently generated streams, with the range.
 
+At the constrained operating point, across three streams:
+
 | Metric | min | median | max | spread |
 |---|---|---|---|---|
-| precision | 0.4003 | **0.4564** | 0.5892 | 0.189 |
-| recall | 0.8234 | **0.8573** | 0.8696 | **0.046** |
+| precision | 0.4117 | **0.4462** | 0.5972 | 0.186 |
+| recall | 0.8189 | **0.8444** | 0.9106 | **0.092** |
 | PR-AUC | 0.6192 | 0.6615 | 0.7928 | 0.174 |
-| net rupees | ₹226,409 | ₹395,017 | ₹408,038 | ₹181,630 |
-| alerts/day | 3.9 | 6.8 | 27.6 | **23.7** |
-| headroom % | −3.016 | −2.820 | −2.416 | 0.599 |
+| net rupees | ₹279,151 | ₹348,845 | ₹395,007 | ₹115,856 |
+| alerts/day | 3.8 | 9.7 | 10.8 | 7.0 |
+| headroom % | −3.255 | −2.674 | −2.397 | 0.858 |
 
-**Recall is now stable and precision is not.** Recall's spread fell from 0.386 to
-**0.046** when the test window went from 6 attack episodes to 60 — that was the
-underpowered-evaluation problem, and it is fixed. Precision still swings 0.40–0.59
-because it is dominated by false positives on one control (§2.1), whose volume
-varies with the stream.
+Per seed, which says *where* the instability is:
 
-**Alerts/day ranges 3.9 to 27.6.** That is the least stable number in the project
-and the one an operations team would care about most. A detector that might
-generate four alerts a day or might generate twenty-eight is not yet a product.
+| seed | threshold | PR-AUC | precision | recall |
+|---|---|---|---|---|
+| 20260824 | 21.99 | 0.6615 | 0.4462 | 0.8444 |
+| 20260825 | 22.05 | 0.6192 | 0.4117 | 0.9106 |
+| 20260826 | 24.53 | 0.7928 | 0.5972 | 0.8189 |
+
+**Recall is far more stable than it was; precision still is not.** Recall's spread
+fell from 0.386 to 0.092 when the test window went from 6 attack episodes to 60 —
+that was the underpowered-evaluation problem, and it is largely fixed. Precision
+still swings 0.41–0.60 because it is dominated by false positives on one control
+(§2.1), whose volume varies with the stream.
+
+PR-AUC is threshold-free, so its 0.174 spread is the detector and the data rather
+than the operating point. Selected thresholds ranged 21.99–24.53, much tighter
+than the 25.90–39.09 seen before the test window was properly powered.
+
+**Alerts/day ranges 3.8 to 10.8** under the constraint — far tighter than the
+3.9–27.6 the unconstrained criterion produced, which is the budget doing its job
+on the axis it actually governs. It governs only that axis; see §0.
 
 ### 0.1 The operating point was being chosen by a cost model this document shows is wrong
 
@@ -122,8 +193,15 @@ looser: episodes are caught on their first event because nearly everything is
 being flagged. The alert budget was chosen as the constraint because a merchant
 can state it from their own staffing; that reasoning stands, but on this evidence
 it is a **weak proxy for how noisy the detector actually is**, and `flag rate`
-belongs beside it. A second constraint on event-level flag rate is the obvious
-follow-up and is listed in §7.
+and `declined` now sit beside it everywhere.
+
+A joint constraint — alerts/day *and* an event-level flag-rate cap — is the
+obvious follow-up. **It was deliberately not added.** Registering a second
+constraint now, after these numbers are known, is exactly the selecting-on-test
+this document spends §0.1 avoiding; doing it honestly means stating the basis
+first and then measuring, and that costs more than the schedule has. It is
+recorded in §7 as diagnosed-not-attempted, alongside the long-horizon BIN
+window.
 
 **Net rupees varies 1.3× across the whole frontier (₹254k–₹324k) while precision
 at a realistic base rate varies 2.7× (0.074–0.203).** The cost model cannot see
@@ -153,25 +231,29 @@ This is a **sensitivity analysis, not a menu.**
 
 | Scenario | episodes caught | median events before first flag | p90 | median rupees exposed |
 |---|---|---|---|---|
-| `burst` | **20/20** | 2 | 36 | ₹83 |
-| `rotating` | **20/20** | 4 | 23 | ₹95 |
-| `slow_low` | **20/20** | 2 | 7 | ₹65 |
+| `burst` | **20/20** | 0 | 32 | ₹26 |
+| `rotating` | **20/20** | 0 | 6 | ₹0 |
+| `slow_low` | **20/20** | 1 | 7 | ₹11 |
 
-Every episode of every attack scenario is caught, at a median of 2–4 events and
-under ₹100 of exposure.
+Every episode of every attack scenario is caught, essentially immediately.
 
-**These are not the numbers Phase 2's addendum reported, and the earlier ones
-should be disregarded.** That run showed a median of 0 events and ₹0 exposed,
-which is not a triumph — it is what a threshold of 21.15 does. Catching every
-episode on its first event is trivially achievable by flagging almost everything,
-and the figure was an artifact of the operating point rather than a property of
-the detector. Measured at the constrained operating point the numbers are worse
-and they are real.
+**Read that with suspicion, because a median of 0 events is exactly what
+over-triggering looks like.** Catching every episode on its first event is
+trivially achievable by flagging almost everything, and at this operating point
+the detector flags **2.52% of all traffic**. The alert budget did not prevent
+this: dedup collapses 42 flagged events into each alert, so an operating point
+that floods at the event level still sits inside a 10-alerts-per-day cap
+(*What a flag does*).
 
-This remains the number closest to the product, but only when it costs something.
-A classifier that eventually labels a burst correctly and a detector that catches
-it on attempt two are both "recall high" and are not the same thing to a
-merchant.
+The p90 column is the more informative one, because it is not saturated: 32 events
+for `burst`, 6 for `rotating`, 7 for `slow_low`. Detection speed is genuinely
+good — the burst p90 of 32 events on episodes of 190–300 events is a real result —
+but the median is not evidence of anything on its own.
+
+An earlier addendum reported 2/4/2 median events from a 60-point grid. Those
+figures are superseded: the finer grid selects a lower threshold inside the same
+budget, and the medians saturate to 0. The honest reading is that **the median was
+never the number to quote here**; p90 is.
 
 **`slow_low` is no longer the weak scenario**, but read that carefully. It caught
 1 of 2 episodes at 1.7% event recall in Phase 2 and now catches 20/20. None of
@@ -179,11 +261,20 @@ that came from a change to the detector — the detector is unchanged. It came f
 the operating point moving and from the test window growing from 2 episodes to 20.
 Its event-level recall is still the lowest of the three at 0.267.
 
-Event-level recall is 0.788 overall. Episode-level detection is 60/60.
-**Alert-level precision is 0.564** — of the 312 alerts a human would open, 176 are
-genuinely card testing. That is the number an analyst actually experiences, and it
-is neither the event-level precision (0.487) nor the base-rate-adjusted figure
-(0.096). All three are reported because they answer different questions.
+Event-level recall is 0.844 overall. Episode-level detection is 60/60.
+
+**Three different precisions, all reported, because they answer different
+questions:**
+
+| | value | what it answers |
+|---|---|---|
+| event-level | 0.446 | of flagged transactions, how many were card testing |
+| alert-level | **0.433** | of the 487 alerts a human opens, how many are real (211) |
+| at 0.15% prevalence | **0.0824** | what either would be at a realistic base rate |
+
+Alert-level precision is what the analyst experiences and is almost never
+reported. Base-rate-adjusted precision is what a merchant would live with. Neither
+replaces the other, and quoting only the first would be the flattering choice.
 
 ---
 
@@ -313,51 +404,75 @@ per-entity baselines across restarts.
 
 ---
 
-## 3. The ablations: a Phase 2 claim, retracted
+## 3. The ablations: retracted once, then re-measured at a different operating point
 
 > **PITCH-VIDEO CANDIDATE — the "what broke" beat.** This section is the most
-> credible thing in the document, and the reason is not the ablation result. It is
-> that a finding was withdrawn because three seeds could not resolve it against
-> its own variance, and the opposite finding was refused on the same grounds. The
-> discipline this whole submission argues for is exactly this: a number you cannot
-> defend is not a result, whichever way it points.
+> credible thing in the document, and the reason is not any ablation result. It is
+> that a finding was withdrawn because three seeds could not resolve it against its
+> own variance, the opposite finding was refused on the same grounds, and when the
+> operating point changed the measurement was run again rather than the old
+> conclusion being carried forward. A number you cannot defend is not a result,
+> whichever way it points.
 
-**Phase 2 reported that dropping the per-entity EWMA baseline improved net
-position by ₹17,159 and concluded the EWMA "is not carrying the detection
-signal". That result was measured on one stream. It does not survive.**
+**The history matters, so it is written out rather than summarised.**
 
-Median across 3 streams, with [min, max]:
+**Phase 2 claimed** that dropping the per-entity EWMA baseline improved net
+position by ₹17,159 and that EWMA "is not carrying the detection signal". Measured
+on one stream.
+
+**That claim was retracted.** Across three seeds at the *unconstrained* operating
+point the delta was ₹12,981 median with a range of [−₹43,496, +₹109,443] — it
+changed sign across streams. The opposite claim, that EWMA is vindicated, was
+refused on the same evidence. The result was reported as a null one.
+
+**At the constrained operating point the measurement comes out differently, and
+this document reports that rather than carrying the null forward.** Median across
+3 streams, with [min, max]:
 
 | variant | precision | recall | net rupees |
 |---|---|---|---|
-| full | 0.456 [0.40, 0.59] | 0.857 [0.82, 0.87] | 395,017 [226,409, 408,038] |
-| drop-EWMA | 0.356 [0.35, 0.37] | 0.844 [0.77, 0.85] | 364,542 [335,852, 407,998] |
-| drop-per-IP | 0.420 [0.41, 0.73] | 0.873 [0.78, 0.92] | 355,738 [264,975, 411,118] |
+| full | **0.446** [0.41, 0.60] | 0.844 [0.82, 0.91] | 348,845 [279,151, 395,007] |
+| drop-EWMA | 0.367 [0.37, 0.40] | 0.793 [0.70, 0.81] | **381,778** [346,266, 410,499] |
+| drop-per-IP | 0.459 [0.42, 0.67] | **0.855** [0.81, 0.91] | 363,661 [307,025, 410,567] |
 
 Paired per seed, which is the only comparison that controls for the stream:
 
 | ablation | net delta vs full (median) | range | beats full on | verdict |
 |---|---|---|---|---|
-| drop-EWMA | ₹12,981 | [−₹43,496, +₹109,443] | 2 of 3 seeds | **not consistent** |
-| drop-per-IP | ₹16,101 | [−₹52,300, +₹38,566] | 2 of 3 seeds | **not consistent** |
+| drop-EWMA | +₹32,933 | [+₹15,492, +₹67,115] | **3 of 3 seeds** | **consistent** |
+| drop-per-IP | +₹15,560 | [+₹14,816, +₹27,874] | **3 of 3 seeds** | **consistent** |
 
-Both deltas change sign across streams. Neither ablation shows a consistent
-effect, and the per-seed range is several times the median gap.
+So on net rupees, **both ablations consistently beat the full detector.** The
+delta no longer changes sign. That is a real change from the null result, and it
+came from moving the operating point, not from new data.
 
-**The honest conclusion is a null result, and it is stated as one:**
+**What that does and does not license.**
 
-- The Phase 2 claim that EWMA is not carrying the signal was **seed noise**, and
-  is withdrawn.
-- The opposite claim — that EWMA is vindicated — is **equally unsupported**. Its
-  median net is higher than both ablations, but it loses on one seed out of three.
-- A three-seed test cannot resolve a gap this small relative to its variance.
-  Resolving it needs either many more seeds or a variance-reduction design
-  (common random numbers across variants), and that is a measurement question,
-  not an architecture question.
+It does *not* license "the EWMA baseline is useless", for a reason established
+earlier in this document and before this table was produced: **§0.1 shows net
+rupees varies 1.3× across the entire operating range while precision at a
+realistic base rate varies 2.7×.** Net rupees is the metric already demonstrated
+to be nearly blind to the difference that matters. Winning consistently on a
+metric that cannot see the important axis is weak evidence, however consistent it
+is.
 
-What can be said with the data in hand: **drop-EWMA costs precision consistently**
-(0.356 median vs 0.456, and its range 0.35–0.37 does not overlap full's 0.40–0.59).
-The net-rupee effect is ambiguous; the precision effect is not.
+On the axis that can see it, the ordering reverses: **drop-EWMA costs precision
+consistently** — 0.367 median against full's 0.446, and its range [0.37, 0.40]
+barely overlaps full's [0.41, 0.60]. It also costs recall (0.793 vs 0.844). It
+buys money by declining more traffic, which is the same trade *What a flag does*
+says the merchant
+pays for.
+
+`drop-per-IP` is the genuinely awkward one: it beats full on net (consistently),
+on precision (0.459 vs 0.446) and on recall (0.855 vs 0.844). The medians are
+close and the ranges overlap heavily, so this is not a demonstration that the
+per-IP axis is harmful — but there is **no evidence in this table that it helps**,
+and the honest statement is that the per-IP axis is unsupported by the ablation
+rather than validated by it.
+
+**Net of all three passes:** the per-entity EWMA baseline is supported on
+precision and unsupported on rupees; the per-IP axis is unsupported on both. No
+component is vindicated here, and the write-up will not claim one is.
 
 ### 3.1 What the README should argue, and why
 
@@ -377,12 +492,17 @@ statement about the cost model rather than about the components.** Specifically:
 - So the two configurations are not the same product even where the model says
   they are worth the same.
 
-**Recommendation:** argue for the full configuration on the basis of precision
-(0.456 vs 0.356, non-overlapping ranges) and alert volume, state explicitly that
-the rupee model does not separate them, and name linear review cost as the
-model's known limitation. Do not present any component as vindicated by the
-ablation table — it does not vindicate anything, and claiming otherwise is the
-exact failure this project exists to avoid.
+**Recommendation:** argue for the full configuration on precision (0.446 vs
+drop-EWMA's 0.367, ranges barely overlapping) and on decline rate, and state
+plainly that **both ablations beat it on net rupees, consistently, across every
+seed.** Then say why that is not the deciding evidence: net rupees is the metric
+§0.1 shows cannot distinguish the good operating point from the bad one, and a
+component that earns money by declining more legitimate customers is not earning
+it in a way the merchant would choose.
+
+State the per-IP result as unsupported rather than harmful, and do not present any
+component as vindicated. The ablation table vindicates nothing; claiming otherwise
+is the exact failure this project exists to avoid.
 
 ---
 
@@ -433,15 +553,15 @@ Two things worth noticing:
   two uncitable assumptions (a ₹500 dispute fee, an 0.8 chargeback rate on
   approved fraud). Halving the assumed rate roughly halves the headline saving.
 
-**The break-even review cost is ₹985 per alert** at the constrained operating
-point (312 alerts, 6.2/day). It was ₹204 at the unconstrained point, where alert
-volume was 1,379. That is the figure to quote, because it is an output rather than
-an assumption: the detector pays for itself as long as reviewing an alert costs
-under ₹985.
+**The break-even review cost is ₹613 per alert** at the constrained operating
+point (487 alerts, 9.7/day). That is the figure to quote, because it is an output
+rather than an assumption: the detector pays for itself as long as reviewing an
+alert costs under ₹613.
 
-That the constraint *raised* break-even by 5× is worth stating plainly — capping
-the alert queue did not trade money for sanity, it improved both. The
-unconstrained point was not on the efficient frontier at all.
+Read it next to *What a flag does* rather than on its own. Break-even counts only what the review
+queue costs; it prices none of the 11,216 legitimate transactions declined, whose
+cost to the merchant the model puts at ₹8,595 and whose cost in customer trust it
+does not model at all.
 
 ---
 
@@ -468,12 +588,20 @@ Ordered by how much they change the credibility of the submission:
    and re-validate it without putting the port at risk.
 2. **Model alert fatigue, or stop reporting net rupees as the deciding metric**
    (§3.1). Linear review cost is why the cost model cannot separate the variants.
-3. **Add an event-level flag-rate constraint** alongside the alerts/day budget.
-   The alert budget alone does not constrain over-triggering, because dedup
-   collapses 42 flagged events into each alert (§0.1). A cap on the fraction of
-   traffic flagged would bind where the alert budget does not, and it is a change
-   to the selection rule rather than to the detector — so it is available even
-   under the freeze.
+3. **Add an event-level flag-rate constraint** alongside the alerts/day budget,
+   as a *joint* constraint. The alert budget alone does not constrain
+   over-triggering, because dedup collapses 42 flagged events into each alert
+   (*What a flag does*). A cap on the share of legitimate traffic declined would
+   bind where the
+   alert budget does not.
+
+   **Diagnosed, not attempted, and here is why.** It is a change to the selection
+   rule rather than the detector, so the freeze does not block it. What blocks it
+   is method: registering a second constraint *after* seeing which budgets score
+   well on test is the selecting-on-test this project spends its credibility
+   avoiding. Doing it honestly means stating the cap and its operational basis
+   first, then measuring once — and that sequence costs more than the remaining
+   schedule has. The number it would constrain is reported prominently instead.
 4. **Reduce variance before running ablations again** — common random numbers
    across variants, or more seeds. §3 is currently a null result for measurement
    reasons, not architectural ones.

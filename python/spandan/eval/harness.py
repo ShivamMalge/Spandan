@@ -245,7 +245,11 @@ def evaluate(
     }
 
     true_alerts = sum(1 for a in alert_list if a["is_true"])
+    clean_events = int(np.sum(labels == 0))
     return {
+        "legit_decline_rate": confusion.fp / clean_events if clean_events else 0.0,
+        "clean_events": clean_events,
+        "flag_rate": float(np.mean(test_scores > threshold)),
         "alert_precision": true_alerts / len(alert_list) if alert_list else 0.0,
         "true_alerts": true_alerts,
         "margin": margin,
@@ -322,9 +326,11 @@ def run_budget_frontier(
             row["median_events"] for row in ttd.values() if not math.isinf(row["median_events"])
         ]
         flagged_mask = test_scores > threshold
+        clean_events = int(np.sum(labels == 0))
         rows.append(
             {
                 "budget": budget,
+                "legit_decline_rate": confusion.fp / clean_events if clean_events else 0.0,
                 "threshold": threshold,
                 "flag_rate": float(flagged_mask.mean()),
                 "flagged_events": int(flagged_mask.sum()),
@@ -358,8 +364,8 @@ def render_frontier(rows: list[dict], model: CostModel) -> None:
     print("transaction at almost nothing - so it bought recall with false positives.")
     print()
     print(f"{'budget':>8}{'thresh':>9}{'alerts/d':>10}{'ev/alert':>10}{'flag rate':>11}"
-          f"{'prec':>8}{'prec@0.15%':>12}{'recall':>8}{'episodes':>10}{'med TTD':>9}"
-          f"{'val net':>12}{'test net':>12}")
+          f"{'declined':>10}{'prec':>8}{'prec@0.15%':>12}{'recall':>8}{'episodes':>10}"
+          f"{'med TTD':>9}{'val net':>12}{'test net':>12}")
     for row in rows:
         marker = " <== HEADLINE" if row["budget"] == model.alerts_per_day_budget else ""
         ttd = row["median_ttd_events"]
@@ -367,6 +373,7 @@ def render_frontier(rows: list[dict], model: CostModel) -> None:
         print(
             f"{row['budget']:>8.0f}{row['threshold']:>9.2f}{row['alerts_per_day']:>10.1f}"
             f"{row['events_per_alert']:>10.0f}{row['flag_rate']:>11.4f}"
+            f"{row['legit_decline_rate']:>10.4f}"
             f"{row['precision']:>8.3f}{row['precision_at_target']:>12.4f}"
             f"{row['recall']:>8.3f}"
             f"{caught_cell:>10}"
@@ -377,6 +384,10 @@ def render_frontier(rows: list[dict], model: CostModel) -> None:
     print()
     print("`prec@0.15%` is precision reweighted to a realistic merchant card-testing")
     print("base rate. It is the number an operations team would actually live with.")
+    print()
+    print("`declined` is the share of LEGITIMATE transactions the control declines -")
+    print("false positives over clean events. A flag declines, so this is what a merchant")
+    print("feels. It is the deployability number, and no alert budget bounds it.")
     print()
     print("AN ALERT BUDGET DOES NOT CONSTRAIN EVENT-LEVEL OVER-TRIGGERING.")
     print("`ev/alert` is how many flagged events each alert collapses. Alerts are")
@@ -453,6 +464,23 @@ def render(result: dict, model: CostModel, split: Split) -> None:
     print(f"prevalence assumed: {reweighted_lead.target_prevalence:.2%}  (ASSUMPTION, costs.toml)")
     print(f"negatives rescaled x{reweighted_lead.negative_scale:,.1f} -> effective FP "
           f"{reweighted_lead.effective_fp:,.0f}")
+
+    print()
+    print("-- what a flag does " + "-" * 58)
+    print("A flag DECLINES the transaction. Alerts are the human-facing grouping of")
+    print("those declines per (merchant, BIN) - they are not a separate, softer action.")
+    print(
+        f"legitimate transactions declined: {result['legit_decline_rate']:.4%}  "
+        f"({confusion.fp:,} of {result['clean_events']:,} clean events)"
+    )
+    if result["legit_decline_rate"] > 0:
+        one_in = 1.0 / result["legit_decline_rate"]
+        print(f"that is 1 in {one_in:,.0f} legitimate customers declined.")
+    print(f"overall flag rate: {result['flag_rate']:.4%} of all traffic")
+    print()
+    print("An alerts/day budget bounds the ANALYST QUEUE and nothing else. It does not")
+    print("bound merchant impact: the decline rate above is the number a merchant feels,")
+    print("and it is the one that decides deployability.")
 
     print()
     print("=" * 78)
@@ -978,6 +1006,8 @@ def summarise(result: dict, rows: list[dict]) -> dict:
         "pr_auc": result["average_precision"],
         "confusion": {"tp": confusion.tp, "fp": confusion.fp, "fn": confusion.fn, "tn": confusion.tn},
         "precision_at_target_prevalence": reweighted.precision_target,
+        "legit_decline_rate": result["legit_decline_rate"],
+        "flag_rate": result["flag_rate"],
         "target_prevalence": reweighted.target_prevalence,
         "gross_rupees": costs.gross_paise / 100.0,
         "break_even_review_rupees": costs.break_even_review_paise() / 100.0,

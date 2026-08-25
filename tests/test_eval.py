@@ -195,6 +195,8 @@ def test_cost_model_matches_hand_worked_example():
         only_charge_if_approved=True,
         assumed_review_paise=4_000,
         target_prevalence=0.0015,
+        alerts_per_day_budget=10.0,
+        frontier_budgets=(2, 5, 10),
     )
     events = [
         _event(ts=1, label=1, status=STATUS_APPROVED, amount_paise=2_000),   # flagged fraud, approved

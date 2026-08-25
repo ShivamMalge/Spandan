@@ -21,6 +21,40 @@ it being written down rather than inferred:
 
 Ties: events with identical timestamps are processed in stream order, and each
 sees every earlier-or-equal event including itself.
+
+## WHAT A FLAG DOES
+
+**A flag declines the transaction it is raised on. It is an inline authorization
+control, not a notification.** Alerts are the human-facing aggregation of those
+declines, grouped per (merchant, BIN); they are how an analyst reviews what the
+control did, not a separate action.
+
+This was ambiguous through Phase 2 and the ambiguity was doing real damage,
+because the report had it both ways: it constrained the operating point on
+*alerts per day* — a measure of analyst workload — while the cost model charged
+blocked-good-transaction value *per event*, which only makes sense if flags
+block. Stated one way, capping alerts reads as capping merchant impact. It is
+not, and the two are not even close: at the headline operating point 20,254
+flagged events collapse into 487 alerts, so an alert budget bounds the review
+queue and says nothing about how many customers were declined.
+
+Consequences of choosing "flags block", all of which the evaluation must carry:
+
+- **The event flag rate is the real operational constraint**, and it belongs
+  beside alerts/day everywhere either appears.
+- The sharper form is the **legitimate-transaction decline rate**: false
+  positives divided by clean events. That is the number a merchant feels, and
+  the one that decides deployability.
+- The cost model's blocked-good term is correct as written, and so is the
+  avoided-chargeback term: both assume the attempt was stopped.
+- A detector that declines 1 in 40 transactions is not deployable at *any* alert
+  budget. See `docs/FAILURE_MODES.md`.
+
+The alternative reading — flags only notify — was available and is equally
+defensible in the abstract, but it would invalidate both sides of the rupee
+model: nothing is prevented until a human acts, so neither the blocked-good cost
+nor the avoided-chargeback saving could be claimed without a response-time model
+this project does not have.
 """
 
 from __future__ import annotations
