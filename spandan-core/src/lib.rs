@@ -28,6 +28,7 @@
 
 pub mod baseline;
 pub mod ingest;
+mod pybridge;
 pub mod score;
 pub mod state;
 pub mod velocity;
@@ -38,10 +39,11 @@ pub use state::Axis;
 
 use pyo3::prelude::*;
 
-/// The PyO3 surface is built out in Phase 4. The Phase 0 toolchain probe has
-/// been deleted, as PHASES.md Phase 3 requires.
+/// The Python-facing module. `pybridge` is a translation layer only - every
+/// scoring decision lives in the five core modules under the parity fixture.
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+    m.add_class::<pybridge::PyDetector>()?;
     Ok(())
 }

@@ -2,8 +2,10 @@
 //!
 //! One [`EntityState`] per (axis, identifier). The store grows with the number
 //! of *distinct entities seen*, never with the number of events processed —
-//! that is the property `memory_bounded_under_entity_churn` asserts, and it is
-//! what the streaming claim rests on.
+//! `window_memory_bounded_per_entity` asserts exactly that and no more. Note
+//! what the claim is NOT: total memory is **linear in entity count**, because
+//! entities are never freed. Per-entity cost and a realistic monthly projection
+//! are measured in `docs/BENCH.md`; the unbuilt fix is FAILURE_MODES §7.
 //!
 //! Card is deliberately absent from [`Axis`]. `gen/ASSUMPTIONS.md` §1.7a forbids
 //! any feature derived from card novelty or first-seen-ness, because the
@@ -191,9 +193,16 @@ mod tests {
     }
 
     #[test]
-    fn memory_bounded_under_entity_churn() {
-        // PHASES.md names this test. The point: retained state must grow with
-        // distinct entities, never with events processed.
+    fn window_memory_bounded_per_entity() {
+        // Renamed at the Phase 3 gate from `memory_bounded_under_entity_churn`,
+        // which asserted something narrower than its name claimed. What IS
+        // bounded: retained events per entity (the ring capacity). What is NOT:
+        // total memory, which is linear in distinct entity count - entities are
+        // never freed. A month of real merchant traffic brings millions of
+        // distinct IPs, each allocating ring buffers that live forever. That is
+        // measured (bytes/entity and a monthly projection) in docs/BENCH.md, and
+        // the unbuilt fix (LRU eviction or a count-min sketch) is recorded in
+        // docs/FAILURE_MODES.md 7.
         const CAPACITY: usize = 16;
         let mut store = StateStore::new();
 

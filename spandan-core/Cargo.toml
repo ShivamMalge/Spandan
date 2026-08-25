@@ -11,6 +11,7 @@ name = "spandan_core"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+numpy = "0.28"
 # abi3-py310: one forward-compatible wheel for Python 3.10+.
 pyo3 = { version = "0.28", features = ["abi3-py310", "extension-module"] }
 

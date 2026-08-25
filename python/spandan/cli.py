@@ -46,8 +46,9 @@ def replay(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    if args.engine == "rust":
-        print("the rust engine arrives in phase 4; running python", file=sys.stderr)
+    # Both engines run behind the same seam. The rust engine's update returns a
+    # bare score (evidence fields stay a reference-engine feature), so the
+    # per-flag detail lines are shown only under the python engine.
 
     data_dir = Path(args.data)
     stream_path = Path(args.stream) if args.stream else data_dir / TEST_FILENAME
@@ -70,7 +71,9 @@ def replay(argv: list[str] | None = None) -> int:
         events = events[: args.limit]
 
     model = CostModel.load()
-    detector = ReferenceDetector(DetectorConfig(threshold=threshold))
+    from .detect.rust_engine import make_detector
+
+    detector = make_detector(args.engine, DetectorConfig(threshold=threshold))
 
     print(BAR)
     print(f"SPANDAN replay  {stream_path.name}  {len(events):,} events  threshold {threshold:.2f}")
@@ -107,6 +110,21 @@ def replay(argv: list[str] | None = None) -> int:
     for event in events:
         flag = detector.update(event)
         if flag is None:
+            continue
+        if isinstance(flag, float):
+            # Rust engine: a score, not a Flag. Above-threshold means flagged.
+            if flag <= threshold:
+                continue
+            flags += 1
+            per_scenario[event.scenario_id] = per_scenario.get(event.scenario_id, 0) + 1
+            if event.label == 1:
+                true_flags += 1
+                if event.status == STATUS_APPROVED:
+                    exposure_paise += (
+                        model.chargeback_fee_paise
+                        + model.chargeback_loss_fraction * event.amount_paise
+                    ) * model.chargeback_rate_on_approved_fraud
+                exposure_paise += model.auth_fee_paise
             continue
         flags += 1
         per_scenario[event.scenario_id] = per_scenario.get(event.scenario_id, 0) + 1

@@ -141,8 +141,12 @@ def test_saturation_keeps_the_decline_counter_consistent():
     assert state.declines_in_window == sum(1 for row in state.events if row[1])
 
 
-def test_memory_bounded_under_entity_churn(stream):
-    """Total state grows with distinct entities, never with event count."""
+def test_window_memory_bounded_per_entity(stream):
+    """Retained events are bounded PER ENTITY; total memory is linear in entities.
+
+    Renamed at the Phase 3 gate: the old name (`memory_bounded_under_entity_churn`)
+    claimed more than the assertion checks. Entities are never freed, so total
+    memory is O(distinct entities) - measured in docs/BENCH.md."""
     detector = ReferenceDetector(DetectorConfig())
     events = stream["train"]
     detector.score_batch(events)

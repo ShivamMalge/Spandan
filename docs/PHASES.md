@@ -365,6 +365,9 @@ cargo test --all -- --nocapture
   #   baseline::tests::welford_matches_two_pass_within_tol   (proptest)
   #   baseline::tests::ewma_bounded_by_input_extremes        (proptest)
   #   state::tests::memory_bounded_under_entity_churn
+  #     (renamed window_memory_bounded_per_entity at the gate: the old name
+  #      claimed bounded TOTAL memory; the assertion checks bounded memory per
+  #      entity, and total memory is linear in entity count - see BENCH.md)
   #   score::tests::parity_with_python_reference_fixture
   #     -> prints max abs score delta and the tolerance it was checked against
 cargo test --release            # green too; release float paths differ
@@ -529,7 +532,13 @@ walk the architecture in five minutes.
      card-novelty ban is a compile error in the Rust core, a test failure in
      Python, and a promise in the docs — three enforcement strengths, and the
      type system's is the strongest.
-  8. **The Phase 4 engine swap is the real parity test, not a formality.**
+  8. **The memory claim, stated precisely.** Bounded per entity, **linear in
+     distinct entity count** — never "bounded memory" unqualified. Quote the
+     measured slope (3,874 bytes/entity Rust, 1,975 Python) and the monthly
+     projection (31 GB / 16 GB at an assumed 8M entities), and point at the
+     unbuilt fix in FAILURE_MODES §7. A systems panelist catches an unqualified
+     bounded-memory claim instantly, and the measurement is already made.
+  9. **The Phase 4 engine swap is the real parity test, not a formality.**
      `make eval ENGINE=rust` vs `ENGINE=python` runs both cores over 1.6M events
      at full state depth. Divergence there after a bit-exact fixture means the
      fixture was still under-covering — useful either way. Report the comparison

@@ -11,6 +11,7 @@
 
 PY := python
 SEEDS ?= 3
+ENGINE ?= python
 
 setup:
 	$(PY) -m pip install --upgrade pip
@@ -25,7 +26,7 @@ data:
 	$(PY) -m spandan.gen.summary --data data
 
 eval:
-	$(PY) -m spandan.eval.harness --data data --seeds $(SEEDS) --json-out data/metrics.json
+	$(PY) -m spandan.eval.harness --data data --seeds $(SEEDS) --engine $(ENGINE) --json-out data/metrics.json
 
 demo:
 	$(PY) -m spandan.cli replay --data data --limit 20000

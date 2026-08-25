@@ -170,3 +170,30 @@ it was applied to its own results, including the flattering ones.
 **Proved by:** `make eval` prints the paired per-seed ablation deltas with the
 verdict "NOT consistent across seeds", and the 600-point frontier alongside the
 superseded 60-point figures.
+
+## 2026-08-24 — the first memory benchmark measured nothing and looked plausible
+**Phase:** 4
+**Symptom:** every RSS column in the first `make bench` run read `0.0MB` — peak
+RSS "0 MB", full-stream growth "0.0MB" for both engines. The throughput tables
+around them were correct, so the output as a whole looked credible enough to
+paste into BENCH.md.
+**First believed:** that Windows working-set accounting simply was not visible
+from Python without a new dependency, and the memory section might need psutil.
+**Actually wrong:** two stacked ctypes mistakes. `ctypes.windll.psapi.GetProcessMemoryInfo`
+resolves on some Windows builds and fails on others (modern Windows exports it as
+`K32GetProcessMemoryInfo` on kernel32) — and with no declared `argtypes`, the
+process pseudo-handle from `GetCurrentProcess()` went through a default `c_int`,
+truncating it on 64-bit. The call failed, the return value went unchecked, and
+the zero-initialised struct was read as data.
+**Fix:** `K32GetProcessMemoryInfo` via `WinDLL("kernel32")` with declared
+`argtypes`/`restype`, `HANDLE` restype on `GetCurrentProcess`, and the return
+value CHECKED — a failure now raises "RSS figures would be fiction" instead of
+reporting zeros.
+**Proved by:** the re-run measured 2,058MB growth for the Rust churn case and
+exposed a real finding the zeros were hiding: the Rust engine costs ~2x the
+memory per entity of the Python one (3,874 vs 1,975 bytes/entity).
+**Worth noting:** a measurement that fails soft is worse than no measurement.
+The zeros would have shipped inside a table whose other columns were honest,
+which is the most credible possible disguise. The ok-check existed for one run
+before it caught this; it earned its place immediately - same pattern as the
+multi-seed check in Phase 2.

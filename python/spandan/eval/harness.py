@@ -18,6 +18,7 @@ from pathlib import Path
 import numpy as np
 
 from ..detect import DetectorConfig, ReferenceDetector
+from ..detect.rust_engine import ENGINES, make_detector
 from ..gen.build import MANIFEST_FILENAME
 from ..gen.schema import ATTACK_SCENARIOS, NEGATIVE_CONTROLS, Event
 from . import metrics
@@ -63,8 +64,14 @@ def rupees(paise: float) -> str:
     return f"{R}{value:,.0f}"
 
 
+#: Engine used by every scoring call this run. Set once in main() from
+#: --engine / ENGINE=, read by the scoring helpers, and printed in the report
+#: header so the provenance of every number includes which core produced it.
+ACTIVE_ENGINE = "python"
+
+
 def score_stream(events: list[Event], config: DetectorConfig) -> np.ndarray:
-    return ReferenceDetector(config).score_batch(events)
+    return make_detector(ACTIVE_ENGINE, config).score_batch(events)
 
 
 def score_with_warmup(
@@ -76,7 +83,7 @@ def score_with_warmup(
     every entity's baseline would be empty for the first stretch of the window
     and the scores would be an artifact of that rather than of the traffic.
     """
-    detector = ReferenceDetector(config)
+    detector = make_detector(ACTIVE_ENGINE, config)
     detector.score_batch(warmup)
     return detector.score_batch(target)
 
@@ -94,7 +101,7 @@ def score_split_once(split: Split, config: DetectorConfig) -> tuple[np.ndarray, 
     than assuming it - this is the kind of optimisation that is easy to get
     subtly wrong and impossible to notice afterwards.
     """
-    detector = ReferenceDetector(config)
+    detector = make_detector(ACTIVE_ENGINE, config)
     detector.score_batch(split.train_warmup)
     validation_scores = detector.score_batch(split.validation)
     test_scores = detector.score_batch(split.test)
@@ -779,7 +786,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--data", default="data")
     parser.add_argument("--seeds", type=int, default=3, help="generator seeds for the spread")
     parser.add_argument("--json-out", default=None)
+    parser.add_argument(
+        "--engine",
+        choices=ENGINES,
+        default="python",
+        help="which detector core scores the stream; the numbers must not depend on it",
+    )
     args = parser.parse_args(argv)
+
+    global ACTIVE_ENGINE
+    ACTIVE_ENGINE = args.engine
 
     data_dir = Path(args.data)
     manifest = json.loads((data_dir / MANIFEST_FILENAME).read_text(encoding="utf-8"))
@@ -789,6 +805,7 @@ def main(argv: list[str] | None = None) -> int:
     config = DetectorConfig()
     split = load_split(data_dir)
 
+    print(f"engine        {ACTIVE_ENGINE}")
     print(f"data          {data_dir.resolve()}")
     print(f"seed          {manifest['seed']}")
     print(f"config hash   {manifest['config_hash'][:16]}")
@@ -1014,6 +1031,7 @@ def summarise(result: dict, rows: list[dict]) -> dict:
         "alerts": costs.alerts,
         "alerts_per_day": result["alerts_per_day"],
         "per_scenario": result["per_scenario"],
+        "engine": ACTIVE_ENGINE,
         "seed_matrix": rows,
     }
 

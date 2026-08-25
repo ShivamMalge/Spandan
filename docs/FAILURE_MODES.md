@@ -530,7 +530,7 @@ From `gen/ASSUMPTIONS.md` §2:
 - **The multi-seed spread at the constrained operating point.** §0's spread table
   is from the unconstrained point; it is retained because the §3 retraction rests
   on it. Regenerating it at the constrained point is a Phase 3 gate item.
-- **No latency or throughput numbers.** Phase 4.
+- ~~No latency or throughput numbers.~~ Measured in Phase 4 — `docs/BENCH.md`.
 - **Cold-start cost is counted, not costed** — the replay path does not run the
   cost model.
 - **Variance reduction was not attempted.** §3's null result is a consequence.
@@ -605,4 +605,16 @@ Ordered by how much they change the credibility of the submission:
 4. **Reduce variance before running ablations again** — common random numbers
    across variants, or more seeds. §3 is currently a null result for measurement
    reasons, not architectural ones.
-5. **Persist baselines across restarts** to remove the cold-start failure (§2.3).
+5. **Bound total memory with entity eviction or a sketch.** Entities are never
+   freed, so total memory is linear in distinct entity count: measured at 3,874
+   bytes/entity (Rust) and 1,975 (Python) under high-cardinality churn, which
+   projects to **31 GB / 16 GB per month** at an assumed 8M distinct entities
+   (`docs/BENCH.md` §4). Two candidate fixes, neither built: **LRU eviction** of
+   cold entities (loses long-idle baselines — an entity returning after eviction
+   is cold-started, re-opening §2.3's failure mode for exactly the rarely-seen
+   entities), or a **count-min sketch** for the velocity counts (hard memory cap;
+   over-counts on hash collisions, which inflates velocity evidence and costs
+   precision — the error is one-sided in the unsafe direction). Both are design
+   changes to frozen state machinery. Until one exists the deployment statement
+   is "restart or shard before the entity table exceeds memory."
+6. **Persist baselines across restarts** to remove the cold-start failure (§2.3).
