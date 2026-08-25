@@ -63,5 +63,33 @@ is the template.
 
 ## Verdict
 
-*(left open until the model side exists — see the comparison at the foot of
-this file once cassettes are recorded)*
+Three artifacts now exist: this hand-written target, the deterministic
+`render_template` (the target reduced to what `str.format` can fill), and the
+cassette notes. Compared on the two axes that matter:
+
+**On the clean case (`txn_000804993`, the ₹5.45 probe), a template suffices.**
+The model note adds one genuine observation the template misses — the card was
+not retried, which fits a probe and not a failed customer — and a more concrete
+decision rule ("three or more sub-₹50 declines on distinct cards"). Marginal.
+If the project shipped only this case, the honest conclusion would be that the
+LLM does not earn its place, and the template would stand.
+
+**On the ambiguous case (`txn_000806675`, ₹150), the free-form note does what
+the template structurally cannot: it re-ranks the hypotheses.** The template's
+headline calls everything "fits card-testing"; the note reads ₹150 as a real
+price point rather than a probe amount, leads with "check for a sale first",
+and reorders the next action around that check — for an event that *is* a
+flash-sale false positive, which the model was never told. Judgement about
+which benign explanation is most likely, given this particular evidence, is
+the one thing a fill-in template cannot vary. That is the narrow claim for the
+model call, and it is conditional on the case being ambiguous.
+
+**Caveats that bound this verdict, stated rather than buried.** The cassette
+notes were authored in-context by the same Anthropic model that built this
+project (no API key existed in the build environment — the cassettes' own
+`recorded_via` says so), by an author who had read this target. The comparison
+is therefore biased toward the model side and is evidence of *capability*, not
+of what an arbitrary API call returns; re-record over the wire before quoting
+it as the latter. What this phase actually earns its place with is the
+boundary: the poisoned-import test proving no evaluation number can pass
+through a language model is worth more than any prose above.

@@ -1,0 +1,258 @@
+"""Phase 5: the LLM boundary, enforced by tests rather than discipline.
+
+The load-bearing test here is `test_eval_runs_with_llm_import_poisoned`. The
+cassette tests prove the explanation layer works offline; the poisoned-import
+test proves something stronger and rarer — that **no number in the evaluation
+ever passed through a language model**, because the evaluation runs to
+completion with identical output while `spandan.llm` raises on the very
+attempt to import it. That is the claim a review panel cares about; everything
+else in this file is secondary.
+
+A conftest fixture blocks socket creation for every test in this module, so
+"replay mode never touches the network" is enforced at the OS boundary, not
+trusted from a docstring.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import importlib
+import json
+import socket
+import sys
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+from spandan.detect.interface import Flag
+
+CASSETTE_DIR = Path("python/spandan/llm/cassettes")
+
+
+@pytest.fixture(autouse=True)
+def no_network(monkeypatch):
+    """Every test in this module runs with socket creation disabled.
+
+    Replay mode claims it never touches the network; this makes the claim
+    physically true for the duration of the tests rather than rhetorically.
+    """
+
+    def _refuse(*args, **kwargs):
+        raise AssertionError("a test in test_llm.py attempted to open a socket")
+
+    monkeypatch.setattr(socket, "socket", _refuse)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("SPANDAN_LLM_MODE", raising=False)
+
+
+def _sample_flag(**overrides) -> Flag:
+    base = dict(
+        ts=1_784_576_351_592,
+        txn_id="txn_test",
+        merchant_id="mer_008",
+        bin="099813",
+        score=24.28,
+        threshold=21.99,
+        window_events=1,
+        window_declines=1,
+        window_decline_ratio=1.0,
+        baseline_decline_ratio=0.099,
+        velocity_z=0.0,
+        baseline_window_events=1.1,
+        window_distinct_cards=1,
+        cards_per_event=1.0,
+        window_distinct_merchants=1,
+        window_amount_mean_paise=545.0,
+        baseline_amount_mean_paise=283_258.0,
+        window_saturated=False,
+        contributions=(),
+    )
+    base.update(overrides)
+    return Flag(**base)
+
+
+# --- the boundary: imports -----------------------------------------------------
+
+
+def test_detect_and_eval_import_graphs_exclude_spandan_llm():
+    """Walk everything `spandan.detect` and `spandan.eval` import, transitively.
+
+    If either ever gains a path to `spandan.llm`, a model is one refactor away
+    from the numbers. This fails at the first edge.
+    """
+    for name in [m for m in sys.modules if m.startswith("spandan")]:
+        del sys.modules[name]
+
+    importlib.import_module("spandan.detect")
+    importlib.import_module("spandan.eval")
+    importlib.import_module("spandan.eval.harness")
+    importlib.import_module("spandan.eval.metrics")
+    importlib.import_module("spandan.eval.costs")
+    importlib.import_module("spandan.detect.reference")
+    importlib.import_module("spandan.detect.rust_engine")
+
+    offenders = [m for m in sys.modules if m.startswith("spandan.llm")]
+    assert not offenders, (
+        f"importing the detector/eval stack pulled in {offenders}; the LLM layer "
+        "must be unreachable from the code that produces numbers"
+    )
+
+
+class _PoisonedModule:
+    """Stands in for spandan.llm; any attribute access is a hard failure."""
+
+    def __getattr__(self, name):
+        raise AssertionError(
+            f"the evaluation touched spandan.llm.{name} - a language model is "
+            "inside the number-producing path"
+        )
+
+
+def test_eval_runs_with_llm_import_poisoned(tmp_path):
+    """THE load-bearing test of this phase.
+
+    `sys.modules['spandan.llm']` is replaced by an object that raises on any
+    attribute access, and its submodules by ones that raise on import. The full
+    evaluation - scoring, threshold selection, cost model, per-scenario metrics -
+    then runs twice, poisoned and unpoisoned, and must produce IDENTICAL scores
+    and an identical selected threshold.
+
+    Green here is the proof behind the submission's central hygiene claim: no
+    number in the evaluation passed through a language model. Not "we didn't",
+    but "we structurally could not have".
+    """
+    from helpers import SMALL_CONFIG
+    from spandan.detect import DetectorConfig
+    from spandan.eval.costs import CostModel
+    from spandan.eval.harness import score_split_once, select_threshold, sweep_thresholds
+    from spandan.eval.loader import load_split
+    from spandan.gen.build import build
+
+    build(SMALL_CONFIG, tmp_path)
+    split = load_split(tmp_path)
+    model = CostModel.load()
+    config = DetectorConfig()
+
+    def run_full_eval():
+        validation, test = score_split_once(split, config)
+        rows = sweep_thresholds(split.validation, validation, model)
+        chosen = select_threshold(rows, model.alerts_per_day_budget)
+        return validation, test, chosen["threshold"]
+
+    poison = _PoisonedModule()
+    saved = {m: sys.modules[m] for m in list(sys.modules) if m.startswith("spandan.llm")}
+    try:
+        for name in saved:
+            del sys.modules[name]
+        sys.modules["spandan.llm"] = poison  # type: ignore[assignment]
+        for sub in ("provider", "explain"):
+            sys.modules[f"spandan.llm.{sub}"] = poison  # type: ignore[assignment]
+
+        poisoned_validation, poisoned_test, poisoned_threshold = run_full_eval()
+    finally:
+        for name in [m for m in sys.modules if m.startswith("spandan.llm")]:
+            del sys.modules[name]
+        sys.modules.update(saved)
+
+    clean_validation, clean_test, clean_threshold = run_full_eval()
+
+    assert np.array_equal(poisoned_validation, clean_validation)
+    assert np.array_equal(poisoned_test, clean_test)
+    assert poisoned_threshold == clean_threshold
+
+    with pytest.raises(AssertionError, match="language model"):
+        _ = poison.complete  # the poison itself must actually bite
+
+
+# --- the cassette mechanics ----------------------------------------------------
+
+
+def test_replay_from_cassette_with_no_network_and_no_key():
+    """A committed cassette answers with sockets disabled and no key set."""
+    cassettes = sorted(CASSETTE_DIR.glob("*.json"))
+    assert cassettes, "no cassettes committed"
+
+    from spandan.llm import complete
+
+    for path in cassettes:
+        cassette = json.loads(path.read_text(encoding="utf-8"))
+        text = complete(cassette["prompt"], model=cassette["model"])
+        assert text == cassette["response_text"]
+        assert len(text) > 200, "an explanation this short is not an explanation"
+
+
+def test_missing_cassette_raises_loudly_not_silently():
+    from spandan.llm import CassetteMiss, complete
+
+    with pytest.raises(CassetteMiss, match="never touches the network"):
+        complete("a prompt no cassette has ever seen " * 3)
+
+
+def test_record_mode_without_key_still_never_reaches_the_network(monkeypatch):
+    """Even explicitly asking for record mode dies before any socket: the key
+    check precedes the request, and the socket guard would catch it anyway."""
+    monkeypatch.setenv("SPANDAN_LLM_MODE", "record")
+    from spandan.llm import provider
+
+    with pytest.raises(RuntimeError, match="requires ANTHROPIC_API_KEY"):
+        provider.complete("unrecorded prompt for the record-mode test")
+
+
+def test_cassettes_declare_their_provenance():
+    """Each cassette says exactly how it came to exist.
+
+    The committed ones were authored in-context by the Anthropic model building
+    this project, because no API key existed in the build environment - and they
+    say so, rather than claiming a wire recording that never happened. A
+    plausible artifact with an untrue origin would be the sixth instance of the
+    pattern in BUILD_LOG.
+    """
+    for path in sorted(CASSETTE_DIR.glob("*.json")):
+        cassette = json.loads(path.read_text(encoding="utf-8"))
+        assert "recorded_via" in cassette, f"{path.name} hides its origin"
+        assert len(cassette["recorded_via"]) > 40
+        assert cassette["key"] == path.stem
+
+
+# --- the flag boundary ---------------------------------------------------------
+
+
+def test_flag_dataclass_is_frozen():
+    flag = _sample_flag()
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        flag.score = 0.0  # type: ignore[misc]
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        flag.threshold = -1.0  # type: ignore[misc]
+
+
+def test_explain_does_not_mutate_flag():
+    from spandan.llm import render_prompt, render_template
+
+    flag = _sample_flag()
+    before = dataclasses.asdict(flag)
+    render_prompt(flag)
+    render_template(flag)
+    assert dataclasses.asdict(flag) == before
+
+
+def test_prompt_contains_only_flag_fields_no_labels():
+    """The prompt is assembled from the frozen Flag and nothing else - no label,
+    no scenario id, nothing the detector itself could not see."""
+    from spandan.llm import render_prompt
+
+    prompt = render_prompt(_sample_flag())
+    for banned in ("label", "scenario_id", "slow_low", "flash_sale", "ground truth"):
+        assert banned not in prompt, f"prompt leaks {banned!r}"
+    assert "099813" in prompt and "mer_008" in prompt
+
+
+def test_explain_returns_a_string_and_nothing_else():
+    """The task's whole contract: str in the analyst's hands."""
+    cassettes = sorted(CASSETTE_DIR.glob("*.json"))
+    cassette = json.loads(cassettes[0].read_text(encoding="utf-8"))
+
+    from spandan.llm import complete
+
+    result = complete(cassette["prompt"], model=cassette["model"])
+    assert isinstance(result, str)

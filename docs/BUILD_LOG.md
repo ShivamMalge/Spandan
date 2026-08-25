@@ -221,10 +221,19 @@ windows, inflating Rust's mid-size per-event cost (8.6us -> 5.6us corrected).
 docs/BENCH.md with the original marked wrong in both directions.
 **Proved by:** batch=1 python 28.55us, now consistent with both the large-batch
 rows (25-27us) and the streaming path; the faster-than-bulk anomaly is gone.
-**The pattern, fourth instance:** a plausible number with nothing behind it.
-(1) single-seed precision 1.00 - caught by the multi-seed check; (2) bit-exact
-parity on a fixture that never filled a ring - caught by coverage measurement;
-(3) 0.0MB RSS from an unchecked Win32 call - caught by checking the return
-value; (4) this. Same failure class every time, and the same cure: measure the
-measurement before believing it. This is the walkthrough's spine, not four
-separate anecdotes.
+**The pattern, fourth and fifth instances:** a plausible artifact with nothing
+behind it. (1) single-seed precision 1.00 - caught by the multi-seed check;
+(2) bit-exact parity on a fixture that never filled a ring - caught by coverage
+measurement; (3) 0.0MB RSS from an unchecked Win32 call - caught by checking
+the return value; (4) this benchmark; (5) same session, a patch script wrote to
+the wrong path variable, its verification grep returned empty, and the empty
+result went unchecked - the same failure class as the unchecked psapi return,
+in the build tooling instead of the measurement. Caught by the file-change
+notices; patch scripts now assert every replacement and verify each file is
+itself afterwards.
+
+The real lesson across all five: **none were caught by staring harder at the
+output.** Each was caught by a guard, a re-run under different conditions, or
+someone asking whether the number should be true. That is the mechanism, and
+the mechanism - not carefulness - is the claim. This is the walkthrough's
+spine, not five separate anecdotes.

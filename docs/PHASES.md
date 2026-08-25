@@ -521,9 +521,17 @@ walk the architecture in five minutes.
      plausible figure with nothing behind it: single-seed precision 1.00, a
      bit-exact fixture that never filled a ring buffer, 0.0MB RSS from an
      unchecked Win32 call, and a batch=1 benchmark that re-scored one hot event.
-     Same cure every time — measure the measurement before believing it. This is
-     the walkthrough's spine, not four separate anecdotes; the two retractions
-     (EWMA, coarse-grid) are the same habit applied to results.
+     Five instances now (the fifth: a patch script's empty verification grep,
+     unchecked — same class as the unchecked Win32 return, in tooling). The
+     sentence the walkthrough must say, close to verbatim: **"none of these were
+     caught by staring harder at the output — each was caught by a guard, a
+     re-run under different conditions, or someone asking whether the number
+     should be true."** The mechanism, not carefulness, is the claim; 'I'm
+     careful' is what every candidate says. The two retractions (EWMA,
+     coarse-grid) are the same habit applied to results.
+  5a. **Verbatim into README and walkthrough:** *"closing a 2× constant on an
+     unbounded curve is polish, not the fix"* — the reason the Rust memory gap
+     was recorded rather than chased.
   6. **Parity, framed correctly (walkthrough candidate).** The escape hatch going
      unused is evidence the paperwork was the work, not that the risk was
      overstated: bit-exact agreement was bought by writing the (t−W, t] window

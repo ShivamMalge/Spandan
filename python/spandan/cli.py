@@ -180,12 +180,80 @@ def replay(argv: list[str] | None = None) -> int:
     return 0
 
 
+def explain(argv: list[str] | None = None) -> int:
+    """`spandan explain --flag-id <txn_id>` - one flag becomes a triage note.
+
+    Replays the stream (reference engine: the Flag's evidence fields exist only
+    there) until the named transaction is flagged, then renders the explanation
+    from cassette. `--template` shows the deterministic no-LLM baseline instead,
+    which is also the honest fallback a missing cassette suggests.
+    """
+    R = _utf8()
+    parser = argparse.ArgumentParser(prog="spandan explain")
+    parser.add_argument("--flag-id", required=True, help="txn_id of the flagged event")
+    parser.add_argument("--data", default="data")
+    parser.add_argument("--threshold", type=float, default=None)
+    parser.add_argument("--template", action="store_true",
+                        help="render the deterministic template instead of the LLM cassette")
+    args = parser.parse_args(argv)
+
+    from .llm import CassetteMiss, explain_flag, render_template
+
+    data_dir = Path(args.data)
+    threshold = args.threshold
+    if threshold is None:
+        metrics_path = data_dir / "metrics.json"
+        threshold = (
+            json.loads(metrics_path.read_text(encoding="utf-8"))["threshold"]
+            if metrics_path.exists()
+            else DetectorConfig().threshold
+        )
+
+    detector = ReferenceDetector(DetectorConfig(threshold=threshold))
+    detector.score_batch(read_stream(data_dir / TRAIN_FILENAME))
+
+    flag = None
+    for event in read_stream(data_dir / TEST_FILENAME):
+        candidate = detector.update(event)
+        if candidate is not None and candidate.txn_id == args.flag_id:
+            flag = candidate
+            break
+        if event.txn_id == args.flag_id:
+            print(f"{args.flag_id} scored below the threshold {threshold:.2f}; nothing to explain")
+            return 1
+    if flag is None:
+        print(f"{args.flag_id} not found in the test stream")
+        return 1
+
+    print(BAR)
+    print(f"FLAG {flag.txn_id}  {flag.merchant_id}  BIN {flag.bin}  "
+          f"score {flag.score:.2f} (> {flag.threshold:.2f})")
+    print(BAR)
+    if args.template:
+        print(render_template(flag))
+        return 0
+    try:
+        print(explain_flag(flag))
+    except CassetteMiss as miss:
+        print(f"[no cassette] {miss}", file=sys.stderr)
+        print()
+        print("deterministic template instead:")
+        print()
+        print(render_template(flag))
+        return 3
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="spandan", add_help=True)
-    parser.add_argument("command", choices=("replay",), help="replay the stream through the detector")
+    parser.add_argument(
+        "command", choices=("replay", "explain"), help="replay the stream, or explain one flag"
+    )
     args, rest = parser.parse_known_args(argv)
     if args.command == "replay":
         return replay(rest)
+    if args.command == "explain":
+        return explain(rest)
     return 2
 
 
