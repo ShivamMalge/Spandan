@@ -516,6 +516,24 @@ walk the architecture in five minutes.
   5. **The two retractions, framed as a pattern** — see `docs/BUILD_LOG.md`. Not
      two anecdotes: the same habit of measuring a load-bearing number a second way
      before believing it.
+  6. **Parity, framed correctly (walkthrough candidate).** The escape hatch going
+     unused is evidence the paperwork was the work, not that the risk was
+     overstated: bit-exact agreement was bought by writing the (t−W, t] window
+     convention and the six-term summation order down *before any Rust existed*.
+     Identical operation order over IEEE 754 doubles gives identical results;
+     ambiguity in the spec, not arithmetic, is what parity risk is made of. And
+     the first fixture was still under-covering — peak ring occupancy 58 of 512 —
+     so "bit-exact" initially meant "bit-exact on the happy path" until review
+     forced a saturating episode.
+  7. **`Axis` has no `Card` variant (walkthrough candidate, "why Rust").** The
+     card-novelty ban is a compile error in the Rust core, a test failure in
+     Python, and a promise in the docs — three enforcement strengths, and the
+     type system's is the strongest.
+  8. **The Phase 4 engine swap is the real parity test, not a formality.**
+     `make eval ENGINE=rust` vs `ENGINE=python` runs both cores over 1.6M events
+     at full state depth. Divergence there after a bit-exact fixture means the
+     fixture was still under-covering — useful either way. Report the comparison
+     as a headline result of Phase 4.
  `README.md` — the loss class and why it is unaddressed, architecture,
 how to run, headline metrics **including the FP cost in rupees**, and limitations.
 Architecture diagram checked in as SVG or ASCII in `docs/`.

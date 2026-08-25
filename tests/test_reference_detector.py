@@ -401,3 +401,27 @@ def test_parity_fixture_carries_no_labels():
         assert banned not in fixture["feature_columns"]
     assert len(fixture["events"]) == len(fixture["expected_scores"])
     assert all(len(row) == len(FEATURE_COLUMNS) for row in fixture["events"])
+
+
+def test_parity_fixture_saturates_the_ring_buffers():
+    """The Python twin of the Rust-side coverage guard.
+
+    Phase 3 review: a fixture that never fills a ring proves parity only on the
+    happy path. The mega-burst episode overflows all four axes' rings inside one
+    window; if a regeneration ever loses it, this fails before the weaker
+    fixture is committed.
+    """
+    from spandan.detect.parity import PARITY_CONFIG
+    from spandan.gen.build import generate_events
+
+    events = generate_events(PARITY_CONFIG)
+    detector = ReferenceDetector(DetectorConfig())
+    detector.score_batch(events)
+
+    saturated_axes = {
+        axis for (axis, _key), state in detector._state.items() if state.saturated
+    }
+    assert saturated_axes == {"bin", "ip", "device", "merchant"}, (
+        f"fixture saturates only {sorted(saturated_axes)}; ring wraparound must be "
+        "exercised on every axis"
+    )

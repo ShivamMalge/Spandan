@@ -7,9 +7,11 @@
 //!
 //! ## What it replays
 //!
-//! `tests/fixtures/parity.tsv` — 2,966 events from a cold start, touching all six
-//! generator scenarios, with one expected score per event. It is committed, so
-//! `cargo test` runs in a fresh clone with no Python step and no generated data.
+//! `tests/fixtures/parity.tsv` — a cold-start stream touching all six generator
+//! scenarios plus a saturating mega-burst, one expected score per event. It is
+//! committed, so `cargo test` runs in a fresh clone with no Python step and no
+//! generated data. The event count is asserted in-test, not documented here,
+//! so this comment cannot go stale.
 //!
 //! The fixture also carries the exact `DetectorConfig` those scores were produced
 //! under, and this test builds its detector from that rather than from
@@ -228,6 +230,27 @@ fn parity_fixture_exercises_more_than_the_cold_start() {
         "no fixture event exceeds the threshold ({peak} vs {}); parity would not \
          cover the flagging path",
         fixture.config.threshold
+    );
+}
+
+#[test]
+fn parity_fixture_saturates_the_ring_buffers() {
+    // Ring wraparound is one of the two places a Rust reimplementation of a
+    // Python deque actually drifts (the other, entity-map eviction, does not
+    // exist in either implementation - entities are never removed). The Phase 3
+    // review found the original fixture peaked at 58 of 512 slots, so parity
+    // had proven only the unsaturated path. This pins the coverage: if the
+    // fixture is ever regenerated without a saturating episode, this fails
+    // rather than parity quietly weakening.
+    let fixture = load_fixture();
+    let mut detector = Detector::new(fixture.config.clone());
+    detector.score_batch(&fixture.events);
+
+    let saturated = detector.store().saturated_entities();
+    println!("entities that saturated their ring: {saturated}");
+    assert!(
+        saturated >= 4,
+        "only {saturated} entities saturated; the fixture no longer exercises          ring wraparound on every axis"
     );
 }
 

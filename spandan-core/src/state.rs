@@ -149,6 +149,17 @@ impl StateStore {
         sum(&self.bins) + sum(&self.ips) + sum(&self.devices) + sum(&self.merchants)
     }
 
+    /// Windows that have hit their capacity bound at least once. Used by the
+    /// parity test to assert the fixture exercises ring wraparound - the Phase 3
+    /// review found the original fixture never filled a ring, so parity had
+    /// verified only the happy path.
+    pub fn saturated_entities(&self) -> usize {
+        let count = |m: &HashMap<String, EntityState>| {
+            m.values().filter(|s| s.window.saturated()).count()
+        };
+        count(&self.bins) + count(&self.ips) + count(&self.devices) + count(&self.merchants)
+    }
+
     pub fn clear(&mut self) {
         self.bins.clear();
         self.ips.clear();

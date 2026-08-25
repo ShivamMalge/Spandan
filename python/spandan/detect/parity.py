@@ -59,6 +59,17 @@ PARITY_CONFIG = GenConfig(
         ScenarioEpisodeSpec("flash_sale", 0.58, 35.0, 150, 145, 140, 135, 0.16, 20_000, 900_000, 1),
         ScenarioEpisodeSpec("issuer_outage", 0.72, 45.0, 160, 52, 50, 48, 0.83, 1_000, 500_000, 0, 2),
         ScenarioEpisodeSpec("outage_single_merchant", 0.86, 40.0, 160, 34, 32, 30, 0.82, 100, 6_000, 1),
+        # The saturating mega-burst. 900 events in 4 minutes on one BIN, one IP,
+        # one device, one merchant: every axis's ring buffer (capacity 512)
+        # overflows inside a single 5-minute window. Phase 3 review found the
+        # original fixture never filled a ring - peak occupancy was 58 of 512 -
+        # so parity had verified the happy path and said nothing about the
+        # wraparound bookkeeping (the forget-on-push path and its interaction
+        # with later time-eviction), which is one of the two places a Rust
+        # reimplementation of a Python deque actually drifts. Benign traffic on
+        # the same merchant afterwards then drains the saturated windows through
+        # evict_before, covering the interaction too.
+        ScenarioEpisodeSpec("burst", 0.93, 4.0, 900, 900, 1, 1, 0.87, 100, 5_000, 0),
     ),
 )
 
