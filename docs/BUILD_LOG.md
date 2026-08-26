@@ -264,3 +264,37 @@ architectural argument for why none of this can touch a number is
 FAILURE_MODES §8.
 
 Lesson: prompt discipline is not a boundary. The import graph is.
+
+## 2026-08-26 — the socket-poison test passed only because of packages the project never declared
+
+**Phase:** 6 (fresh-clone acceptance run)
+**Symptom:** in the fresh clone with its own venv, `make all` failed:
+`test_record_mode_without_key_still_never_reaches_the_network` died with
+`TypeError: function() argument 'code' must be code, not str` raised from
+*inside* `import ssl` — line 1006 of the stdlib, `class SSLSocket(socket):`.
+The same suite had just passed 95/95 on the build machine.
+**First believed:** a broken venv, or the record-mode test genuinely reaching
+the network in the clean environment.
+**Actually wrong:** an import-order dependency hidden by the build machine's
+global site-packages. The `no_network` fixture replaces `socket.socket` with a
+plain function for every test in the module. `ssl` subclasses `socket.socket`
+at import time — so the process's *first* `import ssl` must not happen while
+the poison is in place. On the build machine, globally installed pytest
+plugins (langsmith → httpx → ssl) imported `ssl` during startup, long before
+any fixture ran; the clone's venv declares none of them, so the record-mode
+test's `import urllib.request` performed the first `import ssl` under the
+poison and the class statement itself blew up. Reproduced on the build machine
+with one variable: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest tests/test_llm.py`
+→ same TypeError.
+**Fix:** `tests/test_llm.py` imports `urllib.request` at module top, before
+any fixture patches socket, with a comment saying the import is load-bearing.
+**Proved by:** `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest tests/test_llm.py -q`
+→ 10 passed, and again with plugins enabled → 10 passed.
+**The pattern, and a bonus instance of it:** the fresh-venv-inside-the-clone
+criterion was written to catch exactly this — a suite green because the global
+environment happens to hold something the project never declares — and it
+caught it on first contact. The bonus: the check script itself initially
+reported exit 0 on this failed run, because its output was piped through
+`tail` and the pipeline's exit code was tail's. An unchecked pipeline exit is
+the same class as the unchecked Win32 return and the unchecked patch-script
+grep; the re-run checks the script's own status directly.

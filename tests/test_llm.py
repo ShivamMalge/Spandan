@@ -20,7 +20,15 @@ import importlib
 import json
 import socket
 import sys
+import urllib.request  # noqa: F401  (see below)
 from pathlib import Path
+
+# The urllib.request import above is load-bearing: it transitively performs the
+# process's first `import ssl`, whose SSLSocket class subclasses socket.socket
+# AT IMPORT TIME. It must happen before the no_network fixture replaces
+# socket.socket with a plain function, or that class statement raises TypeError.
+# Caught only by the fresh-clone check: on the build machine, globally installed
+# pytest plugins imported ssl first and hid the ordering dependency.
 
 import numpy as np
 import pytest
