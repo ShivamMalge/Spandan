@@ -1,211 +1,226 @@
 # Spandan
 
-A defense-only, deterministic streaming detector for card-testing and velocity
-abuse on Indian payment streams. One detector specification, two bit-exact
-engines (a Python reference and a Rust core behind PyO3), a rupee-denominated
-evaluation harness that refuses to grade itself kindly, and an LLM explanation
-layer that provably cannot touch a number.
+A deterministic streaming detector for card-testing and velocity abuse on card
+authorization traffic, with a Rust core, a bit-exact Python reference, and an
+evaluation harness that prices its own false positives in rupees.
 
-Everything in this repository is synthetic: identifiers come from reserved
-ranges (ISO/IEC 7812 MII-0 BINs, RFC 5737/RFC 2544 IPs, opaque non-PAN card
-tokens). No real card number, IP, or merchant appears anywhere, and attack
-scenarios are described only as statistical signatures, never procedures.
+## The problem
 
-## The headline, before anything flattering
+Stolen card numbers are worthless until someone knows which ones still work. The
+cheapest way to find out is to attempt a small authorization and read the response,
+so a merchant's checkout gets used as a liveness oracle: a run of low-value
+attempts, mostly declined, concentrated on a few issuing BINs, arriving faster than
+that merchant's real customers. No single attempt is anomalous — the rate and the
+concentration are. Merchants pay for this in scheme chargeback ratios, in
+authorization-abuse penalties, and in the downstream fraud on whichever cards came
+back approved.
 
-**Precision at a realistic merchant card-testing base rate (0.15%, assumed) is
-0.0824 — roughly eleven false alarms for every true catch.** At the generator's
-own 1.33% positive rate precision is 0.4462; that figure flatters the detector
-by an order of magnitude, which is why it does not lead.
+Spandan scores each authorization attempt against per-entity baselines it learns
+from the stream, and **a flag declines the transaction** — it is an inline
+authorization control, not a notification. Alerts are the human-facing grouping of
+those declines per (merchant, BIN), not a softer separate action.
 
-**A flag declines the transaction; alerts are the human-facing grouping of
-those declines per (merchant, BIN), not a softer separate action.** That
-semantic decides which number matters: at the headline operating point 20,254
-flagged events collapse into 487 alerts (42 events per alert), so the
-alerts/day budget bounds the analyst queue and says nothing about merchant
-impact. The number that decides deployability is the share of **legitimate
-transactions declined: 1.41%, or 1 in 71 legitimate customers.**
+## Results
 
-Against that: all 60 attack episodes in the test window are caught (event
-recall 0.844), and detection is fast — p90 of 32/6/7 events to first flag for
-burst/rotating/slow-low (the medians of 0–1 saturate and are not evidence;
-p90 is the honest column).
-
-The summary of where this project stands, both halves measured, neither
-softened: **it detects reliably and fast, and it is not deployable as an
-inline control** — because of the issuer-outage failure mode
-([FAILURE_MODES §2.1](docs/FAILURE_MODES.md)) and the 1-in-71 decline rate
-that follows from it.
-
-## Headline numbers
-
-Medians across three independently generated 100-day, 1.61M-event streams
-(ranges in [FAILURE_MODES §0](docs/FAILURE_MODES.md)); threshold chosen on
-validation only, under the alert-budget constraint.
+Median across three independently generated 100-day streams (1.61M events, 240
+attack and control episodes). Threshold selected on validation only, under an
+alerts/day budget fixed before the test window was read. Ranges in
+[docs/FAILURE_MODES.md](docs/FAILURE_MODES.md) §0.
 
 | metric | value |
 |---|---|
-| precision @ 0.15% base rate | **0.0824** |
-| event-level precision / recall | 0.4462 / 0.8444 |
-| alert-level precision | 0.433 (of 487 alerts, 211 real) |
+| **precision @ 0.15% base rate** | **0.0824** — eleven false alarms per true catch |
+| **legitimate transactions declined** | **1.41%, or 1 in 71** |
+| precision @ generator's 1.33% rate | 0.4462 |
+| alert-level precision | 0.433 (211 real of 487 alerts) |
+| recall (event-level) | 0.8444 |
 | episodes detected | 60/60 |
-| legitimate transactions declined | **1.41% (1 in 71)** |
+| events to first flag (p90) | burst 32 · rotating 6 · slow_low 7 |
+| PR-AUC | 0.6615 |
 | share of all traffic flagged | 2.52% |
-| net position (rupee cost model) | ₹348,845 (range ₹279k–₹395k) |
-| break-even review cost | **₹613 per alert** (an output, not an input) |
-| detection speed (p90 events to first flag) | burst 32 · rotating 6 · slow_low 7 |
+| net position, rupee cost model | ₹348,845 (range ₹279,151–₹395,007) |
+| break-even review cost | ₹613 per alert |
+| streaming throughput / p99 (Rust) | 120,053 events/s / 24.8µs |
 
-The false-positive cost in rupees is inside the net position: the cost model
-charges the full value of every legitimate transaction declined (flags block),
-plus per-alert review at the analyst's loaded cost — the net stays positive
-only while reviewing an alert costs under ₹613.
+Precision at the 0.15% base rate leads because the generator's own positive rate is
+about ten times a realistic merchant rate, and quoting 0.4462 flatters the detector
+by an order of magnitude. Recall is prevalence-independent; precision is not.
 
-**Why the operating point was not moved after seeing test numbers:** the alert
-budget was registered in `costs.toml` before the test window was read (commit
-`e5b48f8`, 2026-08-24), and its basis — what one analyst can work through in a
-day — does not depend on the results. Tighter budgets score better on test,
-and moving the budget now would be selecting on the test set. The budget
-frontier in `make eval` is a sensitivity analysis, not a menu.
+The false-positive cost is inside the net position: the model charges contribution
+margin on every legitimate transaction declined, plus per-alert review, and the net
+stays positive only while an alert review costs under ₹613.
 
-## How to run
+**Two results, and they are separate claims.** It detects every attack episode, and
+fast — 60/60, p90 of 32 events on burst episodes of 190–300. And at a realistic base
+rate it declines 1 in 71 legitimate customers, which is not deployable as an inline
+control. The reason is one measured failure, below.
+
+## Run it
+
+Requires Python ≥3.10 and a Rust toolchain.
 
 ```
-make setup     # venv + editable install + maturin build of the Rust core
-make data      # generate the synthetic streams (byte-identical per seed)
-make eval      # full evaluation, python reference engine
-make eval ENGINE=rust    # identical numbers, rust core
-make test      # pytest + cargo test
-make bench     # engine benchmarks (docs/BENCH.md)
-make demo      # streaming replay demo
-make all       # everything above
+git clone <repo> spandan && cd spandan
+python -m venv .venv && . .venv/Scripts/activate    # Windows; use bin/activate on POSIX
+make setup                                          # pip install -e .[dev] + maturin build
+make data                                           # generate streams        ~2 min
+make eval                                           # full evaluation         ~12 min
 ```
 
-`spandan explain --flag-id <id>` renders the analyst-facing explanation for a
-flag (see *The explanation layer* below). A fresh clone reproduces every
-number in this file: clone, create a venv **inside the clone**, `make setup &&
-make all`; `git status --porcelain` prints nothing afterwards.
+`make eval ENGINE=rust` runs the same evaluation through the Rust core and produces
+a byte-identical metrics JSON. `make test` runs 95 Python tests (~12 min, several
+build streams and run full evaluations) and `cargo test` runs 33 Rust tests.
+`make bench` reproduces [docs/BENCH.md](docs/BENCH.md). `make all` chains data,
+test, eval and demo.
+
+```
+spandan replay --data data --limit 20000     # streaming demo with rupee exposure
+spandan replay --cold-start                  # the cold-start failure, deliberately
+spandan explain --flag-id <txn_id>           # analyst-facing explanation for one flag
+```
+
+Every figure in this file is reproduced by `make eval` on a fresh clone. After
+`make all`, `git status --porcelain` prints nothing.
 
 ## Architecture
 
-The five-minute walk, with the diagram: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-Generator → temporal split → detector (per-entity sliding windows over
-`(t−W, t]` on four axes, Welford/EWMA baselines folded after scoring, six
-score terms in fixed order) → constrained evaluation → alerts. The LLM layer
-hangs off the flag output and is unreachable from the code that produces
-numbers.
+Full walk: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-**The `Axis` enum has no `Card` variant.** The card-novelty ban — this
-detector must never learn "new card = suspicious", which would punish every
-freshly issued card — is a compile error in the Rust core, a test failure in
-Python, and a promise in `gen/ASSUMPTIONS.md §1.7a`. Three enforcement
-strengths, and the type system's is the strongest.
+Five stages, one per Rust module, mirrored by the Python reference: `ingest` →
+`state` → `velocity` → `baseline` → `score`. Per event: advance all four entity
+axes, score, then fold baselines — scoring before folding, so an event is never
+measured against a baseline containing it.
 
-## One spec, two engines, bit-exact
+Axes are BIN, IP, device, and merchant. Each holds a 5-minute sliding window over
+`(t−W, t]` in a 512-slot ring buffer, plus Welford and EWMA baselines fed on a
+60-second sample gate. The score is four evidence terms minus two damping terms, in
+fixed summation order.
 
-The Python reference is the specification: the `(t−W, t]` window convention,
-baseline fold order, and six-term summation order were written down **before
-any Rust existed**. Identical operation order over IEEE 754 doubles gives
-identical results — parity risk is made of spec ambiguity, not arithmetic, and
-the escape hatch going unused is evidence the paperwork was the work. The
-committed 3,866-event fixture agrees at tolerance 1e-9 with measured delta
-0e0 — and the first version of that fixture was still under-covering (peak
-ring occupancy 58 of 512), so "bit-exact" meant "bit-exact on the happy path"
-until review forced a saturating mega-burst into it.
+**`Axis` has no `Card` variant.** No feature may derive from card novelty or
+first-seen-ness, because the flash-sale control only partially controls for it —
+attack cards here are 100% unseen, flash-sale cards ~42%, outage cards ~10%, so a
+novelty feature would separate the classes for free. The ban is a compile error in
+Rust, a test failure in Python, and a line in
+[ASSUMPTIONS.md](python/spandan/gen/ASSUMPTIONS.md) §1.7a.
 
-**The real parity test is the engine swap:** `make eval ENGINE=rust` vs
-`ENGINE=python` runs both cores over 1.6M events at full state depth, and the
-two metrics JSONs differ in exactly one line — the engine label.
+**One specification, two engines.** `detect/reference.py` is the spec. The window
+convention, the baseline fold order, and the six-term summation order were written
+down before any Rust existed, which is what bit-exact agreement is made of —
+identical operation order over IEEE 754 doubles gives identical results, and parity
+risk is spec ambiguity rather than arithmetic. The committed 3,866-event fixture
+agrees at tolerance 1e-9 with measured delta 0e0. The escape hatch permitting a
+tolerance fallback went unused.
 
-**The Rust trade, win and cost in the same sentence:** Rust buys a 5.5×
-streaming throughput gain and a 4.8× better p99 (24.8µs vs 119.3µs) at twice
-the memory per entity — 3,874 vs 1,975 bytes, projecting 31 GB vs 16 GB per
-month at an assumed 8M distinct entities. The memory claim, stated precisely:
-retained events are bounded **per entity**, but entities are never freed, so
-total memory is **linear in distinct entity count** — never "bounded memory"
-unqualified. The unbuilt fixes are recorded with their accuracy trades in
-[FAILURE_MODES §7](docs/FAILURE_MODES.md): LRU/count-min sketch for the
-growth, interning and ring right-sizing for the 2× constant — **closing a 2×
-constant on an unbounded curve is polish, not the fix.** Full tables in
-[docs/BENCH.md](docs/BENCH.md), including the correction history of the
-benchmark itself.
+The fixture alone would be weak evidence: its first version had peak ring occupancy
+of 58 of 512 and never saturated, so "bit-exact" meant bit-exact on the happy path
+until a 900-event mega-burst was added. **The real parity test is the engine swap** —
+`make eval ENGINE=rust` against `ENGINE=python` over 1.6M events at full state depth
+across three streams and three detector variants. The two metrics JSONs differ in
+one line, the engine label.
 
-## The plausible-number pattern
+**The Rust trade, both halves:** Rust buys a 5.5× streaming throughput gain and a
+4.8× better p99 (24.8µs vs 119.3µs) at twice the memory per entity — 3,874 vs 1,975
+bytes, projecting 31 GB vs 16 GB per month at an assumed 8M distinct entities.
+Retained events are bounded **per entity**; entities are never freed, so total memory
+is **linear in distinct entity count**. Two fixes for the 2× constant are identified
+and unbuilt — interning identifiers, right-sizing the ring — because closing a 2×
+constant on an unbounded curve is polish, not the fix. The growth curve is the
+deployment blocker, and eviction or a sketch is what addresses it, each with an
+accuracy cost named in [FAILURE_MODES.md](docs/FAILURE_MODES.md) §7.
 
-The recurring failure class of this project was not a bug in the detector; it
-was **plausible figures with nothing behind them**, five times:
+## What it does not do
 
-1. single-seed precision of 1.00 (a two-episode test window),
-2. a "bit-exact" parity fixture that never filled a ring buffer,
-3. 0.0 MB RSS from an unchecked Win32 call,
-4. a batch=1 benchmark that re-scored one hot event and beat batch=100k,
-5. a doc-patch script whose empty verification grep went unchecked.
+Detail and measurements: [docs/FAILURE_MODES.md](docs/FAILURE_MODES.md).
 
-**None of these were caught by staring harder at the output — each was caught
-by a guard, a re-run under different conditions, or someone asking whether the
-number should be true.** The mechanism, not carefulness, is the claim. The two
-retractions in [FAILURE_MODES §3](docs/FAILURE_MODES.md) (the EWMA ablation,
-the coarse-grid "improvement") are the same habit applied to results, and the
-full history is in [docs/BUILD_LOG.md](docs/BUILD_LOG.md).
+**It cannot distinguish a single-merchant issuer outage from card testing.** A
+negative control built to attack the detector's primary signal with its usual
+separators removed — one merchant, probe-band amounts — has **50.5% of its events
+flagged** (9,170 of 18,169). The highest-scoring clean event scores 80.79 against a
+threshold of 21.99: headroom −267%, on every seed. The mechanism is measured. Retries
+separate an outage from a probe over a whole episode (4.7 attempts per card vs 1.0),
+but the retries are spread across an hour while the window is 5 minutes, so any
+single window sees 1.13 in-window attempts per card for an outage against 1.22 for a
+burst. The damping term points the wrong way. That failure, not the alert queue, is
+what makes the 1-in-71 decline rate irreducible at this window size. The fix — a
+second, long-horizon window on the BIN axis — is diagnosed and unbuilt; the detector
+was frozen as the parity spec for the Rust port.
 
-## The explanation layer
+Also unaddressed:
 
-`spandan explain` replays committed cassettes by default and never touches the
-network. Recording is deliberate: `SPANDAN_LLM_MODE=record` with
-`GEMINI_API_KEY` set in the environment (no .env file, no dotenv loader) makes
-one HTTPS call per cache miss to Gemini's OpenAI-compatible chat-completions
-endpoint, model `gemini-3.1-flash-lite`; each cassette's `recorded_via` field
-names the provider and exact model id that produced it. No number in the
-evaluation passes through a model in either mode — `tests/test_llm.py` proves
-that structurally: the full evaluation runs bit-identically with
-`spandan.llm` replaced by an object that raises on any attribute access.
+- Retry separation and anything slower than the 5-minute window. `slow_low` has the
+  lowest event recall of the three attack scenarios at 0.445.
+- Cold start. With empty baselines, ordinary traffic scores 17–21 standard deviations
+  above a near-zero-variance baseline. Persisting state across restarts is unbuilt.
+- Total memory growth, above.
+- Adaptive attackers. Scenarios are fixed signatures; no evasion is modelled.
+- First-party fraud, mule networks, COD/RTO abuse, and UPI. Different problems with
+  different machinery; none share this one's signal.
 
-That boundary earned its keep. The recorded model output **fabricated
-evidence** — decision rules conditioned on CVV/AVS results and per-card
-history that exist nowhere in the pipeline — and misdescribed the detection
-basis. The comparison against a hand-written target committed before any LLM
-code existed ([TARGET.md](python/spandan/llm/TARGET.md)) concluded that a
-template suffices; the deterministic template, which can only substitute
-fields that exist and therefore cannot fabricate, is the shipped explainer.
-The full finding, and why a hallucinating explainer here degrades one
-analyst note but cannot corrupt a number, is
-[FAILURE_MODES §8](docs/FAILURE_MODES.md). The cassettes stay as recorded —
-re-prompting for a nicer sample would be the same error as selecting a
-threshold on the test set.
+**The loss this prices, and the loss it does not.** The cost model prices avoided
+chargeback exposure, saved authorization fees, and the contribution margin lost on
+blocked good transactions. It does not price scheme monitoring-programme costs,
+merchant reputation, or customer trust — so the worst failure above costs only
+₹11,077 in the model, because outage traffic was mostly declining anyway. That is a
+statement about the cost model, not about the severity of the failure.
 
-Disclosure: the cassettes were recorded on the Gemini API free tier, where
-Google may use prompts and responses to improve its products. Harmless here —
-every identifier in the prompt is synthetic — but it belongs in the record
-alongside everything else this project discloses.
+## Method
 
-## The loss class this project does not address, and its other limits
+- **Temporal split.** Train days 0–50, test days 50–100, no event crossing. The
+  validation window is the last 25% of train, a suffix and never a sample. The loader
+  raises rather than build a non-temporal split. Everything tunable is chosen on
+  validation; the test window is read once.
+- **The operating point was not moved after seeing test numbers.** The alerts/day
+  budget was registered in `costs.toml` before the test window was read (commit
+  `e5b48f8`), and its basis — what one analyst can work through in a day — does not
+  depend on the results. Tighter budgets score better on test. The frontier printed by
+  `make eval` is a sensitivity analysis, not a menu.
+- **Alerts bound the queue, not merchant impact.** 20,254 flagged events collapse into
+  487 alerts, 42 events per alert, which is why the decline rate is reported wherever
+  alerts/day appears.
+- **Synthetic data, because no public dataset carries BIN, IP and device together.**
+  IEEE-CIS is not card-testing-specific and lacks the axes; PaySim is mobile-money
+  with no authorization concept; the Kaggle set is anonymised PCA components. The
+  generator is deliberately unkind: benign decline rates run 4.5–11.5%, attack
+  episodes borrow BINs that carry real benign traffic, and card novelty is banned.
+  Ten ways this stream is unlike real traffic — three of which flatter these results —
+  are itemised in [ASSUMPTIONS.md](python/spandan/gen/ASSUMPTIONS.md) §2.
+- **Cost model assumptions are labelled in
+  [`costs.toml`](python/spandan/eval/costs.toml).** The net position is dominated by
+  the chargeback term, which is the product of two uncitable assumptions — a ₹500
+  dispute fee and an 0.8 chargeback rate on approved fraud. Halving the rate roughly
+  halves the saving. Review cost is reported as a break-even output rather than an
+  input for the same reason.
+- **Five defects in this project were plausible figures with nothing behind them:**
+  single-seed precision of 1.00 on a two-episode test window; a bit-exact parity
+  fixture that never filled a ring buffer; 0.0 MB RSS from an unchecked Win32 call; a
+  batch=1 benchmark that re-scored one hot event and beat batch=100k; and a patch
+  script whose empty verification grep went unchecked. None of these were caught by
+  staring harder at the output — each was caught by a guard, a re-run under different
+  conditions, or someone asking whether the number should be true. Two published
+  findings were withdrawn on the same basis and are kept in place, marked, in
+  [FAILURE_MODES.md](docs/FAILURE_MODES.md) §3 and §0.1.
+- **The LLM explanation layer cannot reach a number.** `spandan.detect` and
+  `spandan.eval` cannot import it, and the full evaluation runs bit-identically with
+  `spandan.llm` replaced by an object that raises on attribute access. The recorded
+  model output fabricated fields the schema does not contain — CVV/AVS results,
+  per-card history — so the deterministic template ships instead. The cassettes are
+  committed as returned. [FAILURE_MODES.md](docs/FAILURE_MODES.md) §8.
 
-- **The single-merchant issuer outage is the headline failure**
-  ([FAILURE_MODES §2.1](docs/FAILURE_MODES.md)): a negative control built to
-  attack the detector's main signal without its usual crutches gets **39.9%
-  of its events flagged**, and the detector's headroom over a naive
-  decline-ratio rule is negative on that control. That failure, not the alert
-  queue, is what makes the 1-in-71 decline rate irreducible at this design's
-  window size — and the diagnosed-but-unbuilt fixes (long-horizon BIN window,
-  joint flag-rate constraint) are recorded in §7, not quietly attempted on a
-  frozen detector.
-- The 5-minute window cannot see retry separation (§2.2) or anything slower
-  than it (a patient tester spacing probes hours apart defeats it, §5).
-- Memory grows linearly with distinct entities; see the trade sentence above.
-- All numbers are synthetic-stream numbers. The generator's assumptions and
-  their known divergences from production traffic are itemized in
-  [gen/ASSUMPTIONS.md](python/spandan/gen/ASSUMPTIONS.md).
+## Repo map
 
-## Naming
+```
+spandan-core/src/     Rust core: ingest, state, velocity, baseline, score, pybridge
+python/spandan/gen/   Synthetic stream generator + ASSUMPTIONS.md
+python/spandan/detect/  Detector interface, Python reference (the spec), Rust adapter, parity fixture
+python/spandan/eval/  Temporal loader, metrics, rupee cost model, evaluation harness, benchmarks
+python/spandan/llm/   Bounded explanation layer, cassettes, hand-written comparison target
+tests/                95 tests: generator, detector, cross-engine parity, evaluation, LLM boundary
+docs/                 ARCHITECTURE, FAILURE_MODES, BENCH, BUILD_LOG, PHASES
+```
 
-Checked 2026-08-26: `spandan` is unclaimed on PyPI
-(`pypi.org/pypi/spandan/json` → 404) and on crates.io, and `spandan-core` —
-the crate's actual name in `Cargo.toml` — is unclaimed on crates.io too (all
-three checks returned 404). Nothing is published; the check is recorded so the
-packaging names are known to be claimable.
+Identifiers are drawn from reserved ranges — ISO/IEC 7812 MII-0 BINs, RFC 5737 and
+RFC 2544 addresses, opaque non-PAN card tokens. No card number is generated anywhere.
+Attack scenarios are described as statistical signatures only.
 
----
-
-Build plan and phase gates: [docs/PHASES.md](docs/PHASES.md) · failure modes:
-[docs/FAILURE_MODES.md](docs/FAILURE_MODES.md) · benchmarks:
-[docs/BENCH.md](docs/BENCH.md) · build log: [docs/BUILD_LOG.md](docs/BUILD_LOG.md)
-· house rules: [agents.md](agents.md)
+`spandan` is unclaimed on PyPI and crates.io, and `spandan-core` on crates.io, as of
+2026-08-26. Nothing is published.
