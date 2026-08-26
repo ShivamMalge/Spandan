@@ -4,10 +4,12 @@ What Spandan misses, what it over-flags, and where its numbers cannot be trusted
 Every claim is backed by a measurement from `make eval` or `spandan replay`, not
 by inspection of the design.
 
-State: end of Phase 2, after the review addendum and the operating-point fix.
-Stream is 100 days, 1.61M events, 240 episodes (20 per scenario per split), three
-seeds. **The detector is frozen from this point through Phase 3** so that the Rust
-port has a stable parity spec. Phase 6 refreshes these numbers.
+State: final (Phase 6). Stream is 100 days, 1.61M events, 240 episodes (20 per
+scenario per split), three seeds. The detector froze at the end of Phase 2 so
+the Rust port had a stable parity spec, and **never unfroze** — so the numbers
+measured then are the final numbers, re-confirmed byte-identically by the
+Phase 4 engine swap (`make eval ENGINE=rust` vs `python`, only the engine
+label differs). §8 was added in Phase 5-6 for the explanation layer.
 
 ---
 
@@ -630,3 +632,60 @@ Ordered by how much they change the credibility of the submission:
    the actual deployment blocker — is untouched by either. Closing a 2× constant
    on an unbounded curve is polish, not the fix.
 6. **Persist baselines across restarts** to remove the cold-start failure (§2.3).
+
+## 8. The explanation layer hallucinates. The boundary is why that is survivable.
+
+**What was measured.** Phase 5's comparison protocol: a hand-written target
+explanation was committed before any LLM code existed, then the model's output
+was recorded over the wire (`gemini-3.1-flash-lite`, 2026-08-26, cassettes
+committed exactly as returned) and judged against it. The result is a negative
+finding, reported here the way the ablation retraction was: as a result, not
+an embarrassment.
+
+**The model fabricates evidence.** On the ₹5.45 probe, its only decision rule
+is "Block the BIN for 24 hours if the CVV/AVS result on this attempt returned
+'Mismatched' or 'Not Supported'" — no CVV or AVS field exists in the `Flag`,
+the prompt, or anywhere in this pipeline. On the ₹150 case it orders "If no
+successful prior history exists at this merchant, blacklist the card and
+cardholder IP immediately" — per-card history and cardholder IP are equally
+absent from the evidence it was given. Both next-actions are conditioned on
+data the analyst does not have. This is the worst failure shape for an
+analyst-facing note: not vagueness but confident, specific, *ungrounded*
+grounds for a block. The prompt explicitly said "the evidence below is
+everything known", and the fabrication happened anyway — prompt discipline is
+not a boundary, which is precisely why this project built a structural one.
+
+**It also misrepresents the detection basis.** Both notes narrate a
+single-credential causal story ("a bot testing a single stolen credential")
+when the detector actually fires on velocity and decline-ratio deviation
+across an entity's sliding window against learned baselines. One note
+attributes the BIN's baseline ticket to the merchant. An explanation that
+misstates what was measured teaches the analyst a wrong model of the alarm.
+
+**Why this cannot touch a number.** The blast radius of a hallucinating
+explainer here is prose, by construction, and the construction is tested:
+
+- `spandan.detect` and `spandan.eval` cannot import `spandan.llm` — the
+  import-graph test fails on the first edge.
+- The full evaluation runs to completion with `sys.modules['spandan.llm']`
+  replaced by an object that raises on any attribute access, producing
+  bit-identical scores and the identical selected threshold (the
+  poisoned-import test). No number in this document passed through a language
+  model — not "we didn't", but "we structurally could not have".
+- `Flag` is frozen; the explainer receives copies of fields and has no write
+  path back into evidence, scores, thresholds, or labels.
+- Replay mode never opens a socket — enforced in tests at the socket layer.
+
+This is the boundary earning its keep. Had the explainer been allowed near
+the decision path — the "LLM triage" shape — the fabricated CVV/AVS rule
+would be a fabricated *blocking criterion*. Here it degrades one analyst
+note, is caught by reading the note against the schema, and corrupts nothing.
+
+**Disposition.** The cassettes stay as recorded; re-prompting for a nicer
+sample after seeing the bad one is the same selection error this project
+refuses on thresholds. `render_template` — which can only substitute fields
+that exist and therefore cannot fabricate — is the shipped explanation. The
+unbuilt fix, recorded in the §7 style of diagnosed-not-attempted: a
+post-hoc validator that checks every factual clause in a model note against
+the `Flag`'s actual fields and rejects notes referencing evidence outside
+them. Not built because the template already has that property for free.

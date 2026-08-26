@@ -61,7 +61,63 @@ two parts that are judgement rather than substitution. If its output is not
 clearly better there, the honest finding is "a template suffices" and this file
 is the template.
 
-## Verdict
+## Verdict, against the recorded model output
+
+Recorded 2026-08-26: `gemini-3.1-flash-lite` over the wire, both committed
+flags, cassettes `9738bd8f…` and `7e36f73e…` kept exactly as they came back —
+not re-prompted, not curated. Re-prompting until a nicer sample appears and
+shipping that one would be the same error as selecting a threshold on the test
+set: the flawed output IS the finding.
+
+**The model output is not better than the hand-written target. It is worse, in
+two ways that matter more than style.**
+
+**1. It fabricates evidence.** The ₹5.45 note's only decision rule is "Block
+the BIN for 24 hours if the CVV/AVS result on this attempt returned
+'Mismatched' or 'Not Supported'" — there is no CVV or AVS field in the `Flag`,
+the prompt, or anywhere in this pipeline. The ₹150 note orders "If no
+successful prior history exists at this merchant, blacklist the card and
+cardholder IP immediately" — per-card history and cardholder IP are equally
+absent from the evidence it was given. Both "Next:" actions are therefore
+conditioned on data the analyst does not have: confident grounds for a block
+that nothing in the system can supply. Note that the prompt already said "the
+evidence below is everything known" — the fabrication happened anyway, which
+is itself a finding: prompt discipline is not a boundary.
+
+**2. It misrepresents what the detector measured.** Both notes tell a
+single-credential causal story — "a bot testing a single stolen credential",
+"confirms this is a programmatic validation" — when the detector fires on
+velocity and decline-ratio deviation across an entity's window against learned
+baselines. The ₹150 note also attributes the baseline ticket to "the
+merchant's average" when it is the BIN's baseline. An explanation that
+misstates the detection basis teaches the analyst a wrong mental model of the
+alarm, which compounds rather than helps.
+
+And on the one axis the superseded comparison below credited a model with —
+re-ranking hypotheses on the ambiguous case — the recorded output does not do
+it. The ₹150 note never considers that ₹150 is a plausible real price point;
+"check for a sale first" is entirely absent, on the event that *is* a
+flash-sale false positive.
+
+**Finding: a template suffices. `render_template` stands as the shipped
+explanation.** The template cannot fabricate, because substitution can only
+place fields that exist; on this evidence that property is worth more than
+fluency. The model call remains in the codebase as what it now honestly is:
+a measured negative result with the blast radius bounded by architecture —
+see FAILURE_MODES §8 for why a hallucinating explainer here degrades prose
+but cannot corrupt a number.
+
+## Superseded: the pre-recording comparison, against in-context notes
+
+> **Superseded 2026-08-26 by the verdict above.** The notes this section
+> compares were authored in-context before any API key existed; their
+> cassettes were removed when the wire recordings replaced them and live in
+> git history (commit `8a6bf8d`), `recorded_via` truthful. The wire recording
+> that replaced them reversed the conclusion — and this section's own caveat
+> said its result was "evidence of *capability*, not of what an arbitrary API
+> call returns; re-record over the wire before quoting it as the latter." The
+> re-record was made, and the arbitrary API call fabricated evidence. Kept
+> because a reversed conclusion that gets deleted gets re-learned.
 
 Three artifacts now exist: this hand-written target, the deterministic
 `render_template` (the target reduced to what `str.format` can fill), and the

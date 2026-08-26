@@ -42,7 +42,7 @@ def no_network(monkeypatch):
         raise AssertionError("a test in test_llm.py attempted to open a socket")
 
     monkeypatch.setattr(socket, "socket", _refuse)
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("SPANDAN_LLM_MODE", raising=False)
 
 
@@ -195,18 +195,18 @@ def test_record_mode_without_key_still_never_reaches_the_network(monkeypatch):
     monkeypatch.setenv("SPANDAN_LLM_MODE", "record")
     from spandan.llm import provider
 
-    with pytest.raises(RuntimeError, match="requires ANTHROPIC_API_KEY"):
+    with pytest.raises(RuntimeError, match="requires GEMINI_API_KEY"):
         provider.complete("unrecorded prompt for the record-mode test")
 
 
 def test_cassettes_declare_their_provenance():
     """Each cassette says exactly how it came to exist.
 
-    The committed ones were authored in-context by the Anthropic model building
-    this project, because no API key existed in the build environment - and they
-    say so, rather than claiming a wire recording that never happened. A
-    plausible artifact with an untrue origin would be the sixth instance of the
-    pattern in BUILD_LOG.
+    A reviewer must be able to tell what produced each explanation: a wire
+    recording names the provider and the exact model id; anything else must
+    state its true origin (the first pair were authored in-context, before any
+    key existed, and said so). A plausible artifact with an untrue origin would
+    be the sixth instance of the pattern in BUILD_LOG.
     """
     for path in sorted(CASSETTE_DIR.glob("*.json")):
         cassette = json.loads(path.read_text(encoding="utf-8"))
