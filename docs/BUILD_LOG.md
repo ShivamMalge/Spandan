@@ -132,7 +132,7 @@ worse than a slow one.
 was wrong by a factor of three. That is the argument for measuring before
 optimising, and it is the same discipline the Rust-vs-NumPy benchmark will need.
 
-## 2026-08-24 — two findings withdrawn on our own initiative: the pattern, not the incidents
+## 2026-08-25 — two findings withdrawn on our own initiative: the pattern, not the incidents
 **Phase:** 2 (addendum) and the frontier fix
 **PITCH-VIDEO CANDIDATE — and this entry is the frame, not either individual bug.**
 
@@ -171,7 +171,7 @@ it was applied to its own results, including the flattering ones.
 verdict "NOT consistent across seeds", and the 600-point frontier alongside the
 superseded 60-point figures.
 
-## 2026-08-24 — the first memory benchmark measured nothing and looked plausible
+## 2026-08-25 — the first memory benchmark measured nothing and looked plausible
 **Phase:** 4
 **Symptom:** every RSS column in the first `make bench` run read `0.0MB` — peak
 RSS "0 MB", full-stream growth "0.0MB" for both engines. The throughput tables
@@ -198,7 +198,7 @@ which is the most credible possible disguise. The ok-check existed for one run
 before it caught this; it earned its place immediately - same pattern as the
 multi-seed check in Phase 2.
 
-## 2026-08-24 — the batch=1 benchmark measured re-scoring one hot event
+## 2026-08-25 — the batch=1 benchmark measured re-scoring one hot event
 **Phase:** 4 (gate follow-up)
 **Symptom:** none, and that is the point. 40,816 ev/s of per-event Python looked
 like a strong, credible baseline. The Phase 4 gate applied the project's own
@@ -237,3 +237,30 @@ output.** Each was caught by a guard, a re-run under different conditions, or
 someone asking whether the number should be true. That is the mechanism, and
 the mechanism - not carefulness - is the claim. This is the walkthrough's
 spine, not five separate anecdotes.
+
+## 2026-08-26 — the recorded explanation cited card-verification fields that do not exist
+
+The Phase 5 comparison was run against real wire output for the first time
+(`gemini-3.1-flash-lite`, free tier, cassettes committed as returned). The
+model's note for the ₹5.45 probe rested its entire decision rule on "the
+CVV/AVS result on this attempt" — a field that exists nowhere in the `Flag`,
+the prompt, or the pipeline. The ₹150 note conditioned a blacklist on per-card
+history and a cardholder IP it was never given. The prompt explicitly said
+"the evidence below is everything known"; the fabrication happened anyway.
+
+Caught by reading the output against the schema — the same move as asking
+whether a number should be true, applied to prose. Not caught by the format
+checks (four parts, under 140 words, no score restated: all passed). A
+well-formed note with invented grounds is the prose version of a plausible
+figure with nothing behind it.
+
+Two decisions followed. The cassettes stay as recorded — re-prompting until a
+nicer sample appears and shipping that one is threshold selection on the test
+set, again. And the shipped explainer is the deterministic template, which
+cannot fabricate because substitution can only place fields that exist. The
+comparison verdict is in `python/spandan/llm/TARGET.md` (the earlier
+in-context comparison is marked superseded there, not swapped); the
+architectural argument for why none of this can touch a number is
+FAILURE_MODES §8.
+
+Lesson: prompt discipline is not a boundary. The import graph is.

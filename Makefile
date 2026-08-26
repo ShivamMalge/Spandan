@@ -32,7 +32,9 @@ demo:
 	$(PY) -m spandan.cli replay --data data --limit 20000
 
 bench:
-	$(PY) scripts/notimpl.py 4 "make bench"
+	$(PY) -m spandan.eval.bench --data data
 
-all:
-	$(PY) scripts/notimpl.py 6 "make all"
+# Everything deterministic, in dependency order. bench is separate on purpose:
+# its numbers are machine-dependent by nature, while everything `all` produces
+# must match the README exactly on any machine.
+all: data test eval demo

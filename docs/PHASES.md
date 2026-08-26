@@ -471,7 +471,7 @@ task, token streaming, letting the LLM see raw events, any LLM involvement in
 **Acceptance criteria.**
 
 ```
-env -u ANTHROPIC_API_KEY pytest tests/test_llm.py -v     # conftest blocks sockets
+env -u GEMINI_API_KEY pytest tests/test_llm.py -v        # conftest blocks sockets
   #   test_replay_from_cassette_with_no_network_and_no_key
   #   test_missing_cassette_raises_loudly_not_silently
   #   test_flag_dataclass_is_frozen
@@ -480,7 +480,7 @@ env -u ANTHROPIC_API_KEY pytest tests/test_llm.py -v     # conftest blocks socke
   #     -> walks imports of spandan.detect and spandan.eval, asserts spandan.llm absent
   #   test_eval_runs_with_llm_import_poisoned
   #     -> sys.modules['spandan.llm'] raises on access; make eval still green
-env -u ANTHROPIC_API_KEY make eval        # unchanged numbers
+env -u GEMINI_API_KEY make eval           # unchanged numbers
 spandan explain --flag-id <id>            # sample explanation pasted
 ```
 
@@ -802,6 +802,58 @@ constraint on this build. Consequences:
   has no slack in it at all.
 - The binding constraint is therefore the calendar and the review cycle, not hours
   available. That makes the cut list, not the clock, the thing to watch.
+
+## Eighth review pass — Aug 26, the Phase 5 gate: the wire recording reversed the verdict
+
+Before the gate, the reviewer switched the recording provider twice (Anthropic
+API → OpenRouter → Gemini free tier via its OpenAI-compatible endpoint, after
+the newest Flash 503'd; `gemini-3.1-flash-lite`, `GEMINI_API_KEY` from the
+environment, no .env) and had `_record` fixed to surface the API's JSON error
+body — a bare "402 Payment Required" with the explanation swallowed had cost
+real time. Then both cassettes were recorded over the wire, and the reviewer's
+own reading of them set the gate:
+
+1. **The model fabricates fields that do not exist** — a CVV/AVS decision rule,
+   per-card history, a cardholder IP — and narrates a single-credential causal
+   story when the detector fires on velocity and decline-ratio deviation.
+   TARGET.md now carries the real comparison (model output not better than the
+   hand-written target; the earlier in-context comparison marked superseded,
+   not swapped), and FAILURE_MODES §8 makes the argument the architecture
+   supports: a hallucinating explainer degrades analyst context but cannot
+   corrupt a number, and the poisoned-import test is why that claim is
+   structural.
+2. **The cassettes stay as recorded.** Re-prompting for a nicer answer after
+   seeing the flawed one is the same error as selecting a threshold on the
+   test set. The flawed output IS the finding.
+3. The free-tier data-use disclosure went into the README next to everything
+   else the project discloses.
+
+Phase 6 authorized in the same message.
+
+## Seventh review pass — Aug 25, after Phase 4
+
+Phase 4 gated with four items, all closed: the Rust trade stated win-and-cost
+in one sentence (README commitment 8); the closable memory fixes written down
+(interning, ring right-sizing) with "closing a 2× constant on an unbounded
+curve is polish, not the fix" verbatim (commitment 5a); the batch=1 Python
+number re-verified under suspicion — "an unexpectedly GOOD baseline number
+deserves the same suspicion" — and found wrong (same-chunk artifact, corrected
+in both directions, BENCH.md); the psapi 0.0MB entry cross-referenced into the
+plausible-number pattern. Phase 5 scope pinned hard: one task, one provider,
+cassettes committed, no tool use, no second task, no agent loop — "if it
+starts growing, stop and report instead of absorbing it." The poisoned-import
+test named the load-bearing one; the hand-written target to be committed
+before any LLM code.
+
+## Sixth review pass — Aug 25, after Phase 3
+
+Phase 3 gated — bit-exact on the first run framed as "the paperwork was the
+work", not luck — with one verification before Phase 4: prove the parity
+fixture exercises ring saturation and eviction. It did not (peak occupancy 58
+of 512), so a 900-event mega-burst was added and guards pinned the coverage on
+both sides; still 0e0. Phase 4 gained one addition: the memory claim made
+precise via a high-cardinality churn run with bytes/entity and a monthly
+projection, and the bounded-memory test renamed to what it actually checks.
 
 ## Fifth review pass — Aug 24, after the Phase 2 addendum
 
