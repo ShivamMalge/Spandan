@@ -84,12 +84,73 @@ Every figure in this file is reproduced by `make eval` on a fresh clone. After
 
 ## Architecture
 
+```mermaid
+%%{init: {"flowchart": {"wrappingWidth": 340, "nodeSpacing": 50, "rankSpacing": 55, "curve": "basis", "padding": 12}}}%%
+flowchart TB
+    GB["<b>benign traffic</b><br/>Poisson · diurnal · Zipf reuse"]
+    GA["<b>3 attack scenarios</b><br/>burst · rotating · slow_low"]
+    GC["<b>3 negative controls</b><br/>flash_sale · issuer_outage<br/>outage_single_merchant"]
+
+    GB ==> SPLIT
+    GA ==> SPLIT
+    GC ==> SPLIT
+
+    SPLIT["<b>temporal split</b> — day-50 wall<br/>loader raises on a non-temporal split"]
+    SPLIT ==>|"train"| VAL["<b>validation</b> — last 25% of train<br/>every tunable chosen here"]
+    SPLIT ==>|"test"| TST["<b>test</b> — read once, after<br/>the operating point is fixed"]
+
+    VAL ==> PY
+    TST ==> PY
+
+    PY["<b>reference.py</b> — the specification<br/>5 stages · 4 axes · <b>no Card axis</b><br/>512-slot ring · Welford + EWMA"]
+    RS["<b>spandan-core</b> — Rust via PyO3<br/>abi3 · zero-copy numeric columns<br/>same five stages"]
+    PY <==>|"bit-exact<br/>0e0 at 1e-9"| RS
+
+    PY ==> DECL["<b>score &gt; threshold → DECLINE</b><br/>inline authorization control<br/>1 in 71 legitimate customers"]
+
+    DECL ==> ALR["<b>alerts</b> — dedup per merchant+BIN<br/>20,254 events → 487 alerts"]
+    DECL -. "frozen Flag" .-> LLM["<b>llm/</b> — explanation only<br/>replay-only cassettes"]
+
+    ALR ==> EV["<b>eval/</b> — constrained selection · three precisions · rupee cost model"]
+    LLM -. "✗ no import path" .-> EV
+
+    classDef spec fill:#1f4e79,color:#ffffff,stroke:#1f4e79
+    classDef rust fill:#8c3d10,color:#ffffff,stroke:#8c3d10
+    classDef danger fill:#a4262c,color:#ffffff,stroke:#a4262c
+    classDef good fill:#2f6b3a,color:#ffffff,stroke:#2f6b3a
+    classDef data fill:#4a4f57,color:#ffffff,stroke:#4a4f57
+    classDef bound fill:#3c3f45,color:#ffffff,stroke:#9aa0a6,stroke-width:2px
+
+    class PY spec
+    class RS rust
+    class DECL danger
+    class EV good
+    class GB,GA,GC,SPLIT,VAL,TST,ALR data
+    class LLM bound
+```
+
 Full walk: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 Five stages, one per Rust module, mirrored by the Python reference: `ingest` →
 `state` → `velocity` → `baseline` → `score`. Per event: advance all four entity
 axes, score, then fold baselines — scoring before folding, so an event is never
 measured against a baseline containing it.
+
+```mermaid
+%%{init: {"flowchart": {"wrappingWidth": 190, "nodeSpacing": 26, "rankSpacing": 34, "curve": "basis"}}}%%
+flowchart LR
+    S1["<b>1 · ingest</b><br/>typed Event<br/>no label field"]
+    S2["<b>2 · state</b><br/>4 axes, no Card<br/>per entity"]
+    S3["<b>3 · velocity</b><br/>512-slot ring<br/>5-min half-open"]
+    S4["<b>4 · baseline</b><br/>Welford + EWMA<br/>60s sample gate"]
+    S5["<b>5 · score</b><br/>4 evidence<br/>− 2 damping"]
+
+    S1 ==> S2 ==> S3 ==> S4 ==> S5
+    S5 -. "baselines folded only after scoring" .-> S4
+
+    classDef stage fill:#4a4f57,color:#ffffff,stroke:#4a4f57
+    class S1,S2,S3,S4,S5 stage
+```
 
 Axes are BIN, IP, device, and merchant. Each holds a 5-minute sliding window over
 `(t−W, t]` in a 512-slot ring buffer, plus Welford and EWMA baselines fed on a
