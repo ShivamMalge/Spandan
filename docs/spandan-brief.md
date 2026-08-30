@@ -1,4 +1,8 @@
-# Spandan — project brief and planning task
+# Spandan — original project brief
+
+The brief the project was planned from, kept for provenance. It describes intent
+before any measurement existed; what was actually built and measured is in
+`README.md`, `docs/FAILURE_MODES.md` and `docs/BENCH.md`.
 
 ## Your task in this session
 
@@ -34,15 +38,15 @@ explains a flag to a human analyst after the fact. **The LLM never decides a fla
 never alters a label.** That separation is a hard architectural commitment, not a
 preference, and the plan should make it structurally impossible to violate.
 
-### What this is being judged on
+### What this project is trying to be
 
-This is a submission to a fintech hiring buildathon, reviewed by a payments risk panel
-in an architecture walkthrough. The stated bar is a working detector for one class of
-loss, with measured precision and recall on a held-out test set, and honest metrics
-including false-positive cost. The panel will have seen many submissions consisting of
-a Kaggle CSV, a randomly split XGBoost model, and a dashboard reporting 99% accuracy.
+The bar is a working detector for one class of loss, with measured precision and
+recall on a held-out test set, and metrics that include false-positive cost. The
+common failure mode in this problem space is a Kaggle CSV, a randomly split
+gradient-boosted model, and a dashboard reporting 99% accuracy — which measures
+almost nothing.
 
-What differentiates this submission is therefore not model sophistication. It is:
+What this project rests on is therefore not model sophistication. It is:
 
 - **A temporal split.** Training data strictly precedes test data. Random or shuffled
   splits are forbidden anywhere in the project.

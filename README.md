@@ -40,7 +40,7 @@ alerts/day budget fixed before the test window was read. Ranges in
 | share of all traffic flagged | 2.52% |
 | net position, rupee cost model | ₹348,845 (range ₹279,151–₹395,007) |
 | break-even review cost | ₹613 per alert |
-| streaming throughput / p99 (Rust) | 120,053 events/s / 24.8µs |
+| streaming throughput / p99 (Rust) | 199,925 events/s / 11.6µs |
 
 Precision at the 0.15% base rate leads because the generator's own positive rate is
 about ten times a realistic merchant rate, and quoting 0.4462 flatters the detector
@@ -79,8 +79,12 @@ spandan replay --cold-start                  # the cold-start failure, deliberat
 spandan explain --flag-id <txn_id>           # analyst-facing explanation for one flag
 ```
 
-Every figure in this file is reproduced by `make eval` on a fresh clone. After
-`make all`, `git status --porcelain` prints nothing.
+Every figure in the results table above except the throughput row is reproduced
+exactly by `make eval` on a fresh clone — two runs four days apart diff
+identically. The throughput, latency and memory figures come from `make bench`,
+which is a single timed run on one machine; they will not reproduce exactly, and
+[docs/BENCH.md](docs/BENCH.md) §6 records how far they moved between two runs
+here. After `make all`, `git status --porcelain` prints nothing.
 
 ## Architecture
 
@@ -159,7 +163,7 @@ fixed summation order.
 
 **`Axis` has no `Card` variant.** No feature may derive from card novelty or
 first-seen-ness, because the flash-sale control only partially controls for it —
-attack cards here are 100% unseen, flash-sale cards ~42%, outage cards ~10%, so a
+attack cards here are 100% unseen, flash-sale cards 56.3%, outage cards 0.9%, so a
 novelty feature would separate the classes for free. The ban is a compile error in
 Rust, a test failure in Python, and a line in
 [ASSUMPTIONS.md](python/spandan/gen/ASSUMPTIONS.md) §1.7a.
@@ -179,9 +183,9 @@ until a 900-event mega-burst was added. **The real parity test is the engine swa
 across three streams and three detector variants. The two metrics JSONs differ in
 one line, the engine label.
 
-**The Rust trade, both halves:** Rust buys a 5.5× streaming throughput gain and a
-4.8× better p99 (24.8µs vs 119.3µs) at twice the memory per entity — 3,874 vs 1,975
-bytes, projecting 31 GB vs 16 GB per month at an assumed 8M distinct entities.
+**The Rust trade, both halves:** Rust buys a 5.38× streaming throughput gain and a
+4.52× better p99 (11.6µs vs 52.4µs) at 2.44× the memory per entity — 4,819 vs 1,971
+bytes, projecting 38.6 GB vs 15.8 GB per month at an assumed 8M distinct entities.
 Retained events are bounded **per entity**; entities are never freed, so total memory
 is **linear in distinct entity count**. Two fixes for the 2× constant are identified
 and unbuilt — interning identifiers, right-sizing the ring — because closing a 2×

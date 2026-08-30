@@ -298,3 +298,52 @@ reported exit 0 on this failed run, because its output was piped through
 `tail` and the pipeline's exit code was tail's. An unchecked pipeline exit is
 the same class as the unchecked Win32 return and the unchecked patch-script
 grep; the re-run checks the script's own status directly.
+
+## 2026-08-30 — three documents disagreed with the build, and no test could have known
+
+**Phase:** 6 (external audit)
+**Symptom:** none visible from inside the project. `make eval` was green and
+byte-identical across runs four days apart, `pytest` was 95/95, `cargo test`
+33/33, the fresh-clone check passed and `git status --porcelain` was empty. A
+read-only audit (`docs/AUDIT.md`) then re-derived every quantitative claim in
+every Markdown file from actual command output instead of from the documents,
+and found that three files disagreed with the build.
+
+**First believed:** that the Phase 6 pass over FAILURE_MODES had already
+regenerated its figures. The header of that file says "State: final (Phase 6)",
+which was written in good faith and made the staleness harder to see, not easier.
+
+**Actually wrong:** §2.1, §1 and §6 of `docs/FAILURE_MODES.md` still carried
+figures from the superseded 60-point grid at threshold 23.05 — including three
+different thresholds for one operating point inside one document.
+`gen/ASSUMPTIONS.md` §1.7/§1.7a/§1.7b carried measurements from the 14-day
+predecessor stream under a heading reading "Measured on the shipped stream".
+`docs/BENCH.md` published throughput and memory figures that a fresh `make bench`
+on the same machine did not reproduce. **Every correction moved against the
+project**: the worst measured failure is 50.5% of a single-merchant outage
+flagged, not the published 39.9%, and the Rust memory slope is 4,819 bytes per
+entity, not 3,874.
+
+**Fix:** figures re-derived from `make eval` (2026-08-30, exit 0) and from one
+dated `make bench` run with the hardware named; `BENCH.md` §6 added to record how
+far the benchmark moved between two runs on the same machine rather than
+publishing the friendlier of the two. One test docstring reworded: the
+card-novelty grep test claimed it "fails the moment a module starts tracking
+first-seen cards", which it does not — it greps five tokens in Python only, and
+the real guards are `test_no_card_novelty_state_is_retained` and the `Axis` enum
+having no `Card` variant. Detector untouched.
+
+**Proved by:** `make eval` re-run after the edits and every figure in every
+document checked against it mechanically; see the audit's verification section.
+
+**The pattern, sixth instance — and the first one a guard did not catch.** The
+five earlier instances were caught by machinery: a multi-seed re-run, a coverage
+measurement, a checked return value, a suspicious-looking baseline, an editor
+notice. This one was caught by an outside reader re-deriving citations from
+output. That difference is the lesson. **No test in this project reads a number
+out of a Markdown file**, so documentation was the one surface where a plausible
+figure with nothing behind it could survive indefinitely — and it did, across
+three files, through a phase gate that believed it had already refreshed them.
+The mechanism sentence still holds and now has a sharper edge: none of the six
+were caught by staring harder at the output, and the sixth needed someone who
+had not written the documents to go and check them.

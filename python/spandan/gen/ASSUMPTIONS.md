@@ -137,14 +137,20 @@ parameter draws 75% of its entities from the benign pools with the *same*
 popularity weights as benign traffic, and 25% as first-time customers with unseen
 cards, IPs and devices.
 
-The **realised** known-customer share on the shipped dataset is **57.5%**, not
-75%, because a weighted draw over a 9,000-card pool still selects some cards that
-never actually transact in a 14-day window. The realised figure is the one that
-matters, so it is measured on every build and recorded in `manifest.json` under
-`negative_case` rather than being inferred from the parameter. The generator was
-not re-tuned to hit the configured number — 57.5% known / 42.5% new is a genuine
-mixture, and adjusting the pool size to make the parameter come out "right" would
-be fitting the data to a figure invented here.
+Two different statistics answer "how mixed is it", and they differ, so both are
+recorded. **Per event — what the detector actually sees — the known-customer
+share is 74.7%**, against the configured 75%. **Per distinct card it is 43.7%**
+(4,357 of 9,968), and that is the figure `manifest.json` records under
+`negative_case`.
+
+The gap is structural, not a defect. Known cards are capped by the benign
+population that actually transacts (8,742 of the 9,000-card pool), while the 25%
+fresh draw mints a new card every time it fires. Over 100 days and ~45 flash-sale
+episodes the fresh cards accumulate and the known ones saturate, so the
+*distinct-card* share falls with stream length while the *per-event* mixture
+stays where it was configured. The generator was not re-tuned to move either
+number; adjusting the pool size to make a statistic come out "right" would be
+fitting the data to a figure invented here.
 
 This is the single most load-bearing choice in the file:
 
@@ -166,11 +172,13 @@ This is a standing constraint on the detector's design, not a note.
 
 The two populations differ in card novelty:
 
+Measured on the shipped stream by recounting `data/*.jsonl.gz` directly:
+
 | Population | Cards never seen elsewhere in the stream |
 |---|---|
 | Attack scenarios (`burst`, `rotating`, `slow_low`) | **100%** — no attack card appears in benign traffic |
-| `flash_sale` | ~42% |
-| `issuer_outage`, `outage_single_merchant` | ~10% |
+| `flash_sale` | **56.3%** (distinct cards; 25.3% of flash-sale *events*) |
+| `issuer_outage`, `outage_single_merchant` | **0.9%** |
 
 So the flash sale controls fully for **volume** and only **partially** for
 **novelty**. A detector that keyed on "share of never-before-seen cards" would
@@ -206,12 +214,16 @@ Measured on the shipped stream:
 
 | Property | issuer_outage | burst | What it means |
 |---|---|---|---|
-| Decline ratio | **82.4%** | 83–89% | Indistinguishable on the primary signal |
-| Distinct BINs | 4 (one per episode) | 1 per episode | Equally concentrated |
-| Attempts per card | **5.36** | 1.58 | Customers retry a declined payment; a probe does not revisit a dead card |
-| Median amount | **₹1,664** | ₹26 | Ordinary basket, not a low probe band |
-| Known-customer share | **89.9%** | 0% | Existing customers with existing baselines |
+| Decline ratio | **82.5%** | 83–89% | Indistinguishable on the primary signal |
+| Distinct BINs | 22 across the stream, 1 per episode | 1 per episode | Equally concentrated |
+| Attempts per card | **12.34** | 1.57 | Customers retry a declined payment; a probe does not revisit a dead card |
+| Median amount | **₹1,658.86** | ₹30.27 | Ordinary basket, not a low probe band |
+| Known-customer share | **99.1%** | 0% | Existing customers with existing baselines |
 | Merchants spanned | 4–5 per episode | 1 | An issuer's customers shop in more than one place |
+
+Every row is read from `manifest.json` under `negative_case.issuer_outage`,
+which is written on every build, so this table cannot drift from the shipped
+stream without the manifest drifting too.
 
 The four rows in bold are the separators available to the detector, and **none of
 them is decline ratio**. This makes the control hard but learnable: if the outage
@@ -281,7 +293,7 @@ Here every merchant shares one evening-peaked curve and differs only in scale.
 This makes the benign baseline more predictable than reality, which likely makes
 the detector look **better** than it would on real traffic.
 
-**2.2 No trend, no seasonality, no holidays.** Volume is stationary across the 14
+**2.2 No trend, no seasonality, no holidays.** Volume is stationary across the 100
 days apart from the diurnal and weekend terms. Real streams have paydays, sale
 seasons and campaign spikes. A baseline estimator that would drift on real data
 has nothing here to drift against.

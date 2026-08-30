@@ -261,7 +261,8 @@ never the number to quote here**; p90 is.
 1 of 2 episodes at 1.7% event recall in Phase 2 and now catches 20/20. None of
 that came from a change to the detector — the detector is unchanged. It came from
 the operating point moving and from the test window growing from 2 episodes to 20.
-Its event-level recall is still the lowest of the three at 0.267.
+Its event-level recall is still the lowest of the three at 0.445
+(burst 0.962, rotating 0.825).
 
 Event-level recall is 0.844 overall. Episode-level detection is 60/60.
 
@@ -284,25 +285,24 @@ replaces the other, and quoting only the first would be the flattering choice.
 
 ### 2.1 The single-merchant issuer outage. This is the headline failure.
 
-At the constrained operating point (threshold 23.05):
+At the constrained operating point (threshold 21.99):
 
 | Control | axis attacked | events | flagged | rate | blocked-good cost |
 |---|---|---|---|---|---|
-| `flash_sale` | volume | 17,787 | 4 | 0.0002 | ₹0 |
-| `issuer_outage` | decline ratio | 18,057 | 1,573 | 0.0871 | **₹1.79L** |
-| **`outage_single_merchant`** | decline ratio, no crutches | 18,169 | **7,240** | **0.3985** | ₹8,595 |
-| `benign` | — | 740,349 | 84 | 0.0001 | ₹29,139 |
+| `flash_sale` | volume | 17,787 | 20 | 0.0011 | ₹350 |
+| `issuer_outage` | decline ratio | 18,057 | 1,818 | 0.1007 | **₹2.03L** |
+| **`outage_single_merchant`** | decline ratio, no crutches | 18,169 | **9,170** | **0.5047** | ₹11,077 |
+| `benign` | — | 740,349 | 208 | 0.0003 | ₹37,847 |
 
-The `flash_sale` control is now essentially clean (4 events of 17,787). The volume
+The `flash_sale` control is close to clean (20 events of 17,787, 0.11%). The volume
 axis is handled. The decline-ratio axis is not.
 
-**At the constrained operating point, 39.9% of a legitimate single-merchant issuer
-outage is flagged as card testing** (7,240 of 18,169 events; it was 59.2% at the
-unconstrained point).
+**At the constrained operating point, 50.5% of a legitimate single-merchant issuer
+outage is flagged as card testing** (9,170 of 18,169 events).
 
 **The negative headroom is the finding, not a failure to report.** The
-highest-scoring clean event scores 80.79 against a threshold of 23.05 — headroom
-−250% — on every seed. What that identifies precisely: the detector has a blind
+highest-scoring clean event scores 80.79 against a threshold of 21.99 — headroom
+−267.4% — on every seed. What that identifies precisely: the detector has a blind
 spot on *legitimate traffic whose declines are concentrated on one BIN at one
 merchant*. It cannot separate that from card testing, because the one feature that
 would — the same card retried — is invisible at the window size it uses (§2.2).
@@ -314,8 +314,8 @@ this rate" but "there is a specific, common, nameable class of legitimate traffi
 it cannot see the difference from.".
 
 **And notice what the rupee column does with that.** The worst failure mode by
-count — 7,240 false positives — costs ₹8,595, while a control flagged five times
-less often costs ₹1.79L. Two reasons, both of which are limitations of the cost
+count — 9,170 false positives — costs ₹11,077, while a control flagged five times
+less often costs ₹2.03L. Two reasons, both of which are limitations of the cost
 model rather than mitigations:
 
 1. `outage_single_merchant` carries low-value baskets by construction, so the
@@ -323,11 +323,11 @@ model rather than mitigations:
 2. Most of its traffic was declining anyway, so blocking it costs no margin at
    all (§6).
 
-A rupee model that scores 7,240 wrongly-blocked legitimate transactions at ₹8.6k
+A rupee model that scores 9,170 wrongly-blocked legitimate transactions at ₹11k
 is telling you something about the model, not about the detector. **Do not read
 the low cost as evidence that this failure is unimportant.** A merchant whose
 customers are being blocked during an issuer outage does not experience it as an
-₹8,595 event, and none of the reputational cost is represented anywhere in
+₹11,077 event, and none of the reputational cost is represented anywhere in
 `costs.toml`.
 
 **This flaw does not stop at the reported figures — it was also choosing the
@@ -336,8 +336,8 @@ net rupees on this same model, so a model that prices false positives at almost
 nothing was deciding how many false positives to accept. That is why §0.1 replaced
 the criterion with a constrained one rather than only annotating the numbers.
 
-The headroom is negative on every seed (−2.4 to −3.0 times the threshold): the
-highest-scoring clean event scores **80.79** against a threshold of **21.15**. The
+The headroom is negative on every seed: the
+highest-scoring clean event scores **80.79** against a threshold of **21.99**. The
 control is not being rejected at all. It is being scored like an attack, and the
 only thing separating the two populations is where the line happens to fall.
 
@@ -351,8 +351,8 @@ What is left is retry structure, and **the detector cannot see it** (§2.2).
 
 Consequences, stated plainly:
 
-- Precision at the observed prevalence is 0.456 median. At the stated realistic
-  0.15% prevalence it falls to **0.069**.
+- Precision at the observed prevalence is 0.4462. At the stated realistic
+  0.15% prevalence it falls to **0.0824**.
 - A merchant running this detector during an issuer outage would have most of
   their legitimate declining traffic flagged, at the worst possible moment.
 - This is a real, common, well-understood payments event. It is the first
@@ -541,12 +541,12 @@ From `gen/ASSUMPTIONS.md` §2:
 
 ## 6. Cost-model sensitivities
 
-Gross ₹2.82L on the headline seed: avoided chargeback exposure ₹5.59L, saved
-authorization fees ₹13,962, blocked good transactions −₹2.91L.
+Gross ₹2.99L on the headline seed: avoided chargeback exposure ₹5.37L, saved
+authorization fees ₹13,557, blocked good transactions −₹2.52L.
 
 Two things worth noticing:
 
-- **11,800 of the 13,947 blocked clean transactions were going to decline
+- **9,397 of the 11,216 blocked clean transactions were going to decline
   anyway**, and so cost the merchant no margin. That is the outage controls
   showing up in the cost model exactly as intended — flagging a declining
   transaction is cheap in rupees even when it is wrong. It is *not* cheap in
@@ -562,7 +562,7 @@ alert costs under ₹613.
 
 Read it next to *What a flag does* rather than on its own. Break-even counts only what the review
 queue costs; it prices none of the 11,216 legitimate transactions declined, whose
-cost to the merchant the model puts at ₹8,595 and whose cost in customer trust it
+cost to the merchant the model puts at ₹2.52L and whose cost in customer trust it
 does not model at all.
 
 ---
@@ -608,9 +608,9 @@ Ordered by how much they change the credibility of the submission:
    across variants, or more seeds. §3 is currently a null result for measurement
    reasons, not architectural ones.
 5. **Bound total memory with entity eviction or a sketch.** Entities are never
-   freed, so total memory is linear in distinct entity count: measured at 3,874
-   bytes/entity (Rust) and 1,975 (Python) under high-cardinality churn, which
-   projects to **31 GB / 16 GB per month** at an assumed 8M distinct entities
+   freed, so total memory is linear in distinct entity count: measured at 4,819
+   bytes/entity (Rust) and 1,971 (Python) under high-cardinality churn, which
+   projects to **38.6 GB / 15.8 GB per month** at an assumed 8M distinct entities
    (`docs/BENCH.md` §4). Two candidate fixes, neither built: **LRU eviction** of
    cold entities (loses long-idle baselines — an entity returning after eviction
    is cold-started, re-opening §2.3's failure mode for exactly the rarely-seen

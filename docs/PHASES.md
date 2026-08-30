@@ -546,9 +546,11 @@ walk the architecture in five minutes.
      Python, and a promise in the docs — three enforcement strengths, and the
      type system's is the strongest.
   8. **The Rust trade, win and cost in the same sentence.** Close to verbatim:
-     *"Rust buys a 5.5× streaming throughput gain and a 4.8× better p99 (24.8µs
-     vs 119.3µs) at twice the memory per entity — 3,874 vs 1,975 bytes,
-     projecting 31 GB vs 16 GB per month at an assumed 8M distinct entities."*
+     *"Rust buys a 5.38× streaming throughput gain and a 4.52× better p99 (11.6µs
+     vs 52.4µs) at 2.44× the memory per entity — 4,819 vs 1,971 bytes,
+     projecting 38.6 GB vs 15.8 GB per month at an assumed 8M distinct entities."*
+     (Figures from the dated `make bench` run in `docs/BENCH.md`; re-quote from
+     there if it is re-run, and see BENCH.md §6 on how far they move.)
      Never the throughput table without the memory slope beside it. The memory
      claim stays precise: bounded per entity, **linear in distinct entity
      count**, never "bounded memory" unqualified, with the unbuilt fixes
@@ -802,6 +804,11 @@ constraint on this build. Consequences:
   has no slack in it at all.
 - The binding constraint is therefore the calendar and the review cycle, not hours
   available. That makes the cut list, not the clock, the thing to watch.
+
+> **The review-pass sections below are a dated record of each gate.** Their
+> figures are as they stood at the time and are superseded wherever they differ
+> from `docs/FAILURE_MODES.md`, `python/spandan/gen/ASSUMPTIONS.md` and
+> `docs/BENCH.md`, which carry the current measurements. See `docs/AUDIT.md`.
 
 ## Eighth review pass — Aug 26, the Phase 5 gate: the wire recording reversed the verdict
 

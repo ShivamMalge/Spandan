@@ -250,15 +250,28 @@ def test_issuer_outage_is_separable_from_a_burst_without_decline_ratio(built):
 
 
 def test_no_card_novelty_feature_exists_anywhere(built):
-    """A standing constraint, enforced rather than remembered.
+    """A standing constraint, kept visible in the source rather than only in docs.
 
-    Attack cards are 100% novel; flash-sale cards are only ~43% novel. The sale
-    therefore controls for volume but only partially for novelty, which is
-    acceptable *only* because no card-novelty feature exists in the design. If
-    one is ever added, the flash sale stops being a valid negative control and
-    the negative case has to be rebuilt.
+    Attack cards are 100% novel; flash-sale cards are 56.3% novel by distinct
+    card, 25.3% by event. The sale therefore controls for volume but only
+    partially for novelty, which is acceptable *only* because no card-novelty
+    feature exists in the design. If one is ever added, the flash sale stops
+    being a valid negative control and the negative case has to be rebuilt.
 
-    This test fails the moment a module starts tracking first-seen cards.
+    WHAT THIS TEST ACTUALLY CHECKS, stated precisely because the difference
+    matters: it greps the non-generator Python packages for five specific
+    tokens. It catches a novelty feature that is *named* like one. It does not
+    catch a novelty feature named anything else, and it does not read the Rust
+    core at all.
+
+    The real guards are elsewhere and are stronger:
+      - behavioural, Python: test_no_card_novelty_state_is_retained in
+        tests/test_reference_detector.py renames every card to an unseen value
+        and asserts the score arrays are identical. A detector keying on
+        novelty fails it regardless of naming.
+      - structural, Rust: `Axis` has no `Card` variant, so a card-keyed
+        baseline is a compile error.
+    This test is the cheap third layer, not the enforcement.
     """
     import spandan
     from pathlib import Path

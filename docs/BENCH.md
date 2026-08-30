@@ -1,9 +1,16 @@
 # Engine benchmarks
 
 Rust core (`spandan-core` behind PyO3) against the Python reference
-(`detect/reference.py`), measured by `make bench` on the build machine (Windows
-11, Python 3.11.9, `--release` wheel). Raw output; nothing here was re-run until
-it looked better, and the losses are in the tables.
+(`detect/reference.py`). Raw output; nothing here was re-run until it looked
+better, and the losses are in the tables.
+
+**Every figure below is one `make bench` run, 2026-08-30, on: AMD Ryzen 7 5800HS
+(16 logical cores), 15.4 GB RAM, Windows 11 build 10.0.26200, Python 3.11.9,
+rustc 1.94.0, `--release` wheel, 300,000-event stream.** These are timings and a
+process-RSS measurement on one loaded laptop; they are the least reproducible
+numbers in this repository and they are not expected to reproduce exactly
+anywhere else. See §6 for how far they moved between two runs on this same
+machine.
 
 The reference is the *specification* — scalar, loop-shaped, written to be read.
 It was not de-optimised to lose: its O(1) incremental aggregates were added in
@@ -35,22 +42,22 @@ none.
 
 ## 2. Batch scoring
 
-200,000 real events; per-row median of repeated calls on a warmed detector.
+300,000 real events; per-row median of repeated calls on a warmed detector.
 
 | batch | engine | events/s | µs/event |
 |---|---|---|---|
-| 1 | python | 35,026 | 28.55 |
-| 1 | **rust** | 52,910 | 18.90 |
-| 10 | python | 39,262 | 25.47 |
-| 10 | **rust** | 152,788 | 6.54 |
-| 100 | python | 37,623 | 26.58 |
-| 100 | **rust** | 179,872 | 5.56 |
-| 1,000 | python | 39,655 | 25.22 |
-| 1,000 | **rust** | 180,138 | 5.55 |
-| 10,000 | python | 36,895 | 27.10 |
-| 10,000 | **rust** | 162,389 | 6.16 |
-| 100,000 | python | 38,857 | 25.74 |
-| 100,000 | **rust** | 157,952 | 6.33 |
+| 1 | python | 33,956 | 29.45 |
+| 1 | **rust** | 52,632 | 19.00 |
+| 10 | python | 40,000 | 25.00 |
+| 10 | **rust** | 149,254 | 6.70 |
+| 100 | python | 39,120 | 25.56 |
+| 100 | **rust** | 179,388 | 5.57 |
+| 1,000 | python | 40,723 | 24.56 |
+| 1,000 | **rust** | 184,250 | 5.43 |
+| 10,000 | python | 38,549 | 25.94 |
+| 10,000 | **rust** | 165,157 | 6.05 |
+| 100,000 | python | 37,858 | 26.41 |
+| 100,000 | **rust** | 152,063 | 6.58 |
 
 **These are corrected figures; the first published table was wrong in both
 directions.** The Phase 4 gate asked whether 40,816 ev/s of per-event Python was
@@ -68,11 +75,11 @@ The correction cuts against Rust at batch=1 in relative terms (1.5× rather than
 1.6×) and for it at mid sizes (4–5× rather than 3–4×); it was made because the
 number was wrong, not because of which way it pointed.
 
-**Rust wins every batch size measured, including batch=1.** The plan required at
-least one row where the reference wins or ties; that row did not materialise on
-this machine, and saying so honestly is the requirement — the closest regime is
-batch=1, where per-call overhead (kwargs, columnarisation of a single event,
-FFI) eats most of Rust's advantage.
+**Rust wins every batch size measured, including batch=1** (1.55× there, 4.5–4.6×
+at mid sizes). The plan required at least one row where the reference wins or
+ties; that row did not materialise on this machine, and saying so is the
+requirement — the closest regime is batch=1, where per-call overhead (kwargs,
+columnarisation of a single event, FFI) eats most of Rust's advantage.
 
 "Zero-copy" in these numbers means the **numeric columns** (timestamps, amounts,
 declined flags) are borrowed from NumPy without copying. The six identifier
@@ -83,12 +90,13 @@ that cost is inside every Rust row above, not excused out of it.
 
 | engine | events/s | p50 µs | p95 µs | p99 µs |
 |---|---|---|---|---|
-| python | 21,766 | 43.80 | 72.80 | 119.30 |
-| **rust** | 120,053 | **8.10** | 11.50 | 24.80 |
+| python | 37,191 | 25.50 | 37.50 | 52.40 |
+| **rust** | 199,925 | **4.70** | 6.20 | 11.60 |
 
-5.5× on throughput, and the p99 stays under 25µs. This is the shape a live
-authorization hook sees, and it is where the Rust core earns its place: at
-120k events/s a single thread covers roughly 10 billion events/day of headroom.
+**5.38× on throughput and 4.52× on p99**, which stays under 12µs. This is the
+shape a live authorization hook sees, and it is where the Rust core earns its
+place: at 200k events/s a single thread covers roughly 17 billion events/day of
+headroom. Single-threaded; no concurrent measurement was made.
 
 ## 4. Memory — where Rust loses, and the claim stated precisely
 
@@ -98,17 +106,17 @@ distinct entity count.** The test formerly named `memory_bounded_under_entity_ch
 asserted the per-entity bound only, and has been renamed
 `window_memory_bounded_per_entity` to say what it checks.
 
-Full stream (200k events, 10,819 entities): python +5.6MB, rust +58.6MB RSS.
+Full stream (300k events, 12,662 entities): python +10.3MB, rust +65.8MB RSS.
 
 High-cardinality churn — nearly every event brings a never-seen IP and device,
 the worst realistic case (carrier-grade NAT churns addresses aggressively):
 
 | engine | events | entities | RSS grown | bytes/entity | projected monthly |
 |---|---|---|---|---|---|
-| rust | 400,000 | 531,282 | 2,058 MB | **3,874** | **31.0 GB** |
-| python | 400,000 | 531,282 | 1,049 MB | **1,975** | **15.8 GB** |
+| rust | 400,000 | 531,282 | 2,560 MB | **4,819** | **38.6 GB** |
+| python | 400,000 | 531,282 | 1,047 MB | **1,971** | **15.8 GB** |
 
-**The Rust engine costs ~2× the memory per entity of the Python one.** Diagnosed
+**The Rust engine costs 2.44× the memory per entity of the Python one.** Diagnosed
 but deliberately not fixed (Phase 4 rule: record what the benchmark exposes, do
 not chase it; and the core is frozen through this phase):
 
@@ -132,16 +140,51 @@ memory", and 31 GB/month says how often that is.
 
 ## 5. Which regime favours which
 
-**The trade in one sentence: Rust buys a 5.5× streaming throughput gain and a
-4.8× better p99 (24.8µs vs 119.3µs) at twice the memory per entity (3,874 vs
-1,975 bytes, projecting 31 GB vs 16 GB per month at 8M entities).** Both halves
-are measured; neither is the whole story alone.
+**The trade in one sentence: Rust buys a 5.38× streaming throughput gain and a
+4.52× better p99 (11.6µs vs 52.4µs) at 2.44× the memory per entity (4,819 vs
+1,971 bytes, projecting 38.6 GB vs 15.8 GB per month at an assumed 8M
+entities).** Both halves are measured; neither is the whole story alone.
 
-- **Rust**: every throughput regime measured, most decisively streaming (5.5×,
-  p99 < 25µs) and mid-size batches (4–5×). The case for the port is latency and
-  headroom, and it is real.
+- **Rust**: every throughput regime measured, most decisively streaming (5.38×,
+  p99 < 12µs) and mid-size batches (4.5–4.6×). The case for the port is latency
+  and headroom, and it is real.
 - **Python reference**: memory (½ the per-entity cost), inspectability (rich
   `Flag` evidence on every update; the Rust surface returns scores), and being
   the specification. `make eval` runs it by default for exactly that reason.
 - **Neither**: the evaluation's wall clock, which is dominated by generation and
   the threshold sweep — engine choice moves `make eval` by ~2×, not 4–5×.
+
+## 6. These figures moved between two runs on the same machine
+
+The tables above are the 2026-08-30 run. The previous published run, same
+machine, same commit of the detector, gave materially different numbers, and the
+difference is recorded here rather than smoothed over:
+
+| figure | earlier run | 2026-08-30 run | change |
+|---|---|---|---|
+| rust streaming | 120,053 ev/s, p99 24.80µs | 199,925 ev/s, p99 11.60µs | +66% / −53% |
+| python streaming | 21,766 ev/s, p99 119.30µs | 37,191 ev/s, p99 52.40µs | +71% / −56% |
+| rust bytes/entity | 3,874 | 4,819 | +24% |
+| python bytes/entity | 1,975 | 1,971 | −0.2% |
+| rust churn RSS | 2,058 MB | 2,560 MB | +24% |
+| batch=1 python | 28.55 µs | 29.45 µs | +3% |
+
+**The throughput and latency movement is machine state**, not a code change:
+background load, thermal headroom and clock behaviour on a laptop move timings
+by this much, and the batch table — which is dominated by steady-state work —
+barely moved.
+
+**The memory movement is not explained that way, and should not be presented as
+though it were.** The churn workload is deterministic: both runs saw exactly
+531,282 entities. Python's slope is stable to 0.2% across the two runs while
+Rust's moved 24%, which points at allocator behaviour — arena reuse and
+fragmentation under a different heap history — rather than at measurement noise.
+Same-process sequential RSS sampling cannot separate those. **The honest
+statement is that the Rust per-entity slope is somewhere around 3,900–4,800
+bytes and this benchmark cannot pin it more tightly than that.** The conclusion
+the number is used for is unaffected in either direction: the slope is linear in
+entity count, it is roughly 2–2.5× Python's, and the deployment blocker is the
+linearity rather than the constant.
+
+What would pin it: an allocator-level counter rather than process RSS, and a
+fresh process per engine. Neither was built.
