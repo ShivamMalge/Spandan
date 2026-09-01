@@ -86,6 +86,72 @@ which is a single timed run on one machine; they will not reproduce exactly, and
 [docs/BENCH.md](docs/BENCH.md) §6 records how far they moved between two runs
 here. After `make all`, `git status --porcelain` prints nothing.
 
+## Use it
+
+Three things to know. A detector is a state machine you feed events into, in time
+order. `update()` returns a `Flag` when the event scores above the threshold and
+`None` otherwise. **Baselines are learned from the stream, so a cold detector
+scores nothing useful** — it needs history before its output means anything, which
+is why the snippet below replays the training window first.
+
+```python
+from pathlib import Path
+from spandan.detect import DetectorConfig, ReferenceDetector
+from spandan.gen.build import read_stream, TRAIN_FILENAME, TEST_FILENAME
+
+detector = ReferenceDetector(DetectorConfig(threshold=21.99))
+
+# Warm the per-entity baselines. Skip this and see docs/FAILURE_MODES.md §2.3.
+for event in read_stream(Path("data") / TRAIN_FILENAME):
+    detector.update(event)
+
+for event in read_stream(Path("data") / TEST_FILENAME):
+    flag = detector.update(event)
+    if flag is None:
+        continue
+    print(f"FLAG {flag.txn_id}  {flag.merchant_id}  BIN {flag.bin}")
+    print(f"  score {flag.score:.2f} > threshold {flag.threshold:.2f}")
+    print(f"  window: {flag.window_events} events, {flag.window_decline_ratio:.0%} declined"
+          f" (this BIN's baseline {flag.baseline_decline_ratio:.0%})")
+    for term, value in flag.contributions:
+        print(f"    {term:<16}{value:+8.3f}")
+    break
+```
+
+```
+FLAG txn_000804993  mer_008  BIN 099813
+  score 24.28 > threshold 21.99
+  window: 1 events, 100% declined (this BIN's baseline 10%)
+    decline_bin      +18.029
+    amount            +6.253
+    velocity_bin      +0.000
+    velocity_ip       +0.000
+    repetition        -0.000
+    merchant_span     -0.000
+```
+
+The `Flag` is frozen and carries the evidence the score was computed from, so
+nothing downstream has to recompute anything. **The six contributions sum to the
+score** (`test_flag_contributions_sum_to_the_score`), which is what stops an
+explanation asserting a cause the arithmetic does not support.
+
+**Swapping engines** is one string, and it is how the parity claim is checked:
+
+```python
+from spandan.detect.rust_engine import make_detector
+
+scores = {e: make_detector(e, config).score_batch(events) for e in ("python", "rust")}
+np.array_equal(scores["python"], scores["rust"])   # True
+np.max(np.abs(scores["python"] - scores["rust"]))  # 0.0  — on 50,000 real events
+```
+
+**To feed your own traffic**, build `spandan.gen.schema.Event` records: `ts`
+(epoch ms), `txn_id`, `merchant_id`, `bin`, `card_ref` (any opaque token — never a
+card number), `ip`, `device_id`, `amount_paise`, and `status` (`"approved"` or
+`"declined"`). `label` and `scenario_id` exist for evaluation only; the detector
+cannot read them, and `FEATURE_COLUMNS` excludes both. Events must arrive in
+non-decreasing `ts` order — the window logic assumes it.
+
 ## Architecture
 
 ```mermaid
