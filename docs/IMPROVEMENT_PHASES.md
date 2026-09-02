@@ -242,12 +242,15 @@ rejects any explanation referencing evidence outside the `Flag`. Build it.
    and a one-line reason; the rejected note goes to stderr for the record.
 
 2. **Measure it, do not assert it.** Run the validator over both committed
-   cassettes: it must reject both (they are the fabrication finding). Then
-   record two more cassettes with a prompt revised to enumerate the fields
-   that exist and state that nothing else may be cited — and report the
-   rejection rate on those too, whatever it is. Four cassettes, four verdicts,
-   in a table in §8. If the revised prompt still fabricates, that is the
-   result, and it strengthens the boundary argument.
+   cassettes: it must reject both (they are the fabrication finding). Then,
+   because the recording provider changed to Groq (`llama-3.3-70b-versatile`)
+   between the finding and this phase, record **two pairs**, not one, so the
+   two variables are not confounded: the *plain* prompt on the new model (does
+   a different model family fabricate?) and the *grounded* prompt on the new
+   model (does enumerating what does not exist help?). Six cassettes, six
+   verdicts, in a table in §8, whatever the counts are. If the grounded prompt
+   still fabricates, that is the result, and it strengthens the boundary
+   argument.
 
 3. **Tests.** `test_validator_rejects_the_recorded_fabrications` (the two
    committed cassettes must fail), `test_validator_accepts_the_template`
@@ -264,11 +267,11 @@ loops, a second provider.
 **Acceptance criteria.**
 
 ```
-env -u GEMINI_API_KEY pytest tests/test_llm.py -v        # all pass, sockets blocked
+env -u GROQ_API_KEY pytest tests/test_llm.py -v          # all pass, sockets blocked
 pytest tests/test_llm.py::test_eval_runs_with_llm_import_poisoned   # STILL GREEN
 python -m spandan.cli explain --flag-id txn_000804993    # exit 4 (validator rejection), template shown
 python -m spandan.cli validate-cassettes                 # one verdict per cassette, with reasons
-ls python/spandan/llm/cassettes/ | wc -l                 # 4
+ls python/spandan/llm/cassettes/ | wc -l                 # 6: 2 gemini plain, 2 groq plain, 2 groq grounded
 ```
 
 **Effort.** 3h. **Risk: low.** Gains: axis 7 → 7, axis 9 → 9.

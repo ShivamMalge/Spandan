@@ -77,6 +77,7 @@ test, eval and demo.
 spandan replay --data data --limit 20000     # streaming demo with rupee exposure
 spandan replay --cold-start                  # the cold-start failure, deliberately
 spandan explain --flag-id <txn_id>           # analyst-facing explanation for one flag
+spandan validate-cassettes                   # grounding verdict per recorded explanation
 ```
 
 Every figure in the results table above except the throughput row is reproduced
@@ -334,8 +335,22 @@ statement about the cost model, not about the severity of the failure.
   `spandan.eval` cannot import it, and the full evaluation runs bit-identically with
   `spandan.llm` replaced by an object that raises on attribute access. The recorded
   model output fabricated fields the schema does not contain — CVV/AVS results,
-  per-card history — so the deterministic template ships instead. The cassettes are
-  committed as returned. [FAILURE_MODES.md](docs/FAILURE_MODES.md) §8.
+  per-card history — and the cassettes are committed as returned. A validator
+  (`llm/grounding.py`) now rejects any note that cites evidence outside the prompt
+  it was generated from: 2 of 2 recorded notes rejected, the template passes by
+  construction, and `explain_flag` returns a model note only when it is grounded.
+  [FAILURE_MODES.md](docs/FAILURE_MODES.md) §8.
+- **Recording provenance and data-use disclosure.** Replay is the default and never
+  touches the network; recording is opt-in via `SPANDAN_LLM_MODE=record` with the
+  key read from the environment — no `.env`, no dotenv loader. Each cassette's
+  `recorded_via` names the provider and exact model. The two cassettes that
+  constitute the fabrication finding were recorded on the **Gemini API free tier**
+  (`gemini-3.1-flash-lite`), where Google may use prompts and responses to improve
+  its products. Later cassettes are recorded via the **Groq API**
+  (`llama-3.3-70b-versatile`, `GROQ_API_KEY`); Groq's privacy policy and terms of
+  use defer API data handling to its Services Agreement and DPA, which were not
+  reviewed here. In every case the prompt contains only synthetic identifiers from
+  reserved ranges — there is no real card, IP, or merchant to leak.
 
 ## Repo map
 

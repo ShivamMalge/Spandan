@@ -471,7 +471,7 @@ task, token streaming, letting the LLM see raw events, any LLM involvement in
 **Acceptance criteria.**
 
 ```
-env -u GEMINI_API_KEY pytest tests/test_llm.py -v        # conftest blocks sockets
+env -u GROQ_API_KEY pytest tests/test_llm.py -v          # conftest blocks sockets
   #   test_replay_from_cassette_with_no_network_and_no_key
   #   test_missing_cassette_raises_loudly_not_silently
   #   test_flag_dataclass_is_frozen
@@ -480,7 +480,7 @@ env -u GEMINI_API_KEY pytest tests/test_llm.py -v        # conftest blocks socke
   #     -> walks imports of spandan.detect and spandan.eval, asserts spandan.llm absent
   #   test_eval_runs_with_llm_import_poisoned
   #     -> sys.modules['spandan.llm'] raises on access; make eval still green
-env -u GEMINI_API_KEY make eval           # unchanged numbers
+env -u GROQ_API_KEY make eval             # unchanged numbers
 spandan explain --flag-id <id>            # sample explanation pasted
 ```
 

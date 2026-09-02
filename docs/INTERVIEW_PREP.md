@@ -2453,7 +2453,7 @@ scope without being requested.
 
 The one that matters here is `no_network` in `tests/test_llm.py`: autouse, so **every
 test in that module runs with socket creation disabled** — `monkeypatch.setattr(socket,
-"socket", _refuse)` — plus `GEMINI_API_KEY` and `SPANDAN_LLM_MODE` deleted from the
+"socket", _refuse)` — plus `GROQ_API_KEY` and `SPANDAN_LLM_MODE` deleted from the
 environment.
 
 That converts a documentation claim into a physical property. "Replay mode never
@@ -2694,10 +2694,13 @@ the only place in the repository that may open a connection to a model provider.
 Two modes on `SPANDAN_LLM_MODE`. **replay** (default): answers come from committed
 cassettes keyed by `sha256(model + "\n" + prompt)[:32]`; no network, no key, no
 sockets; a miss raises `CassetteMiss` loudly and never falls through. **record**: one
-HTTPS call per cache miss to Gemini's OpenAI-compatible chat-completions endpoint,
-model `gemini-3.1-flash-lite`, authenticated by `GEMINI_API_KEY` read straight from
+HTTPS call per cache miss to Groq's OpenAI-compatible chat-completions endpoint,
+model `llama-3.3-70b-versatile`, authenticated by `GROQ_API_KEY` read straight from
 the environment — no .env file and no dotenv loader, so there is nothing to
-accidentally commit.
+accidentally commit. (The two cassettes that constitute the fabrication finding
+were recorded earlier on Gemini `gemini-3.1-flash-lite`; the cassette key includes
+the model id, so recordings from both providers coexist and never replay as one
+another.)
 
 A single egress point buys three things: it is one file to audit for the "does this
 ever call out" question; it is one place to change providers, which I did twice

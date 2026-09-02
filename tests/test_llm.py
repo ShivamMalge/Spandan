@@ -50,7 +50,7 @@ def no_network(monkeypatch):
         raise AssertionError("a test in test_llm.py attempted to open a socket")
 
     monkeypatch.setattr(socket, "socket", _refuse)
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.delenv("SPANDAN_LLM_MODE", raising=False)
 
 
@@ -203,7 +203,7 @@ def test_record_mode_without_key_still_never_reaches_the_network(monkeypatch):
     monkeypatch.setenv("SPANDAN_LLM_MODE", "record")
     from spandan.llm import provider
 
-    with pytest.raises(RuntimeError, match="requires GEMINI_API_KEY"):
+    with pytest.raises(RuntimeError, match="requires GROQ_API_KEY"):
         provider.complete("unrecorded prompt for the record-mode test")
 
 
