@@ -347,3 +347,43 @@ three files, through a phase gate that believed it had already refreshed them.
 The mechanism sentence still holds and now has a sharper edge: none of the six
 were caught by staring harder at the output, and the sixth needed someone who
 had not written the documents to go and check them.
+
+## 2026-09-03 — `spandan: command not found`; `make setup` needed a maturin nobody declared
+
+**Phase:** 6 (Phase D, mid-recording)
+**Symptom:** `spandan explain --flag-id …` in a plain PowerShell window:
+`The term 'spandan' is not recognized`. The README's Run-it block uses that
+command in four places. `python -m spandan.cli …` worked throughout.
+**First believed:** the user's `Scripts/` directory was not on `PATH`. It was.
+Then: that `maturin develop --release` (the third line of `make setup`) was
+clobbering the console script that `pip install -e` had created.
+**Actually wrong:** two things, neither of them that. (1) The global editable
+install dated from 12:52 on Aug 24; `[project.scripts]` was added to
+`pyproject.toml` at 14:41 the same day and the install was never re-run, so
+its dist-info had no `entry_points.txt` and no launcher was ever generated —
+`maturin develop` preserves an existing editable dist-info rather than
+regenerating it, which is correct behaviour and is why later builds never
+fixed it. (2) The one that matters for anyone else: **`maturin` was not in the
+`dev` extras**, so `make setup`'s `maturin develop --release` resolved only
+because a maturin happened to be installed globally. On a clean machine the
+third line of the documented setup fails with `maturin: command not found`.
+**Why the fresh-clone check missed it:** the in-clone-venv criterion catches
+*site-packages* leakage — the pytest-plugin bug in entry nine — but a tool on
+`PATH` is not in site-packages. Same failure class, one directory over.
+Reproduced in a throwaway venv: after `pip install -e .`, `Scripts/` has
+`spandan.exe` and `entry_points.txt` but no `maturin.exe`.
+**Fix:** `maturin>=1.14,<2.0` added to `[project.optional-dependencies] dev`,
+so the first `make setup` line installs the tool the third line needs, into
+the venv the third line runs in. README gains one sentence: every `spandan`
+command also works as `python -m spandan.cli`. The user's env fixed by
+re-running `make setup`. Detector untouched.
+**Proved by:** fresh venv → `maturin.exe` absent → `pip install -e .[dev]` →
+`maturin.exe` PRESENT, `spandan.exe` present → `maturin develop --release`
+from the venv's own maturin → launcher still present, entry point
+`spandan=spandan.cli:main`, `spandan explain --help` runs, `spandan_core`
+imports. The candidate one-step fix (`--config-settings=build-args=--release`)
+was tried and rejected: maturin's PEP 517 metadata hook does not accept it.
+**Worth noting:** nothing in `make all` ever invoked the console script —
+`make demo` uses `python -m spandan.cli` — so the acceptance run could not
+have caught a broken launcher. A CI job on a runner with no global tooling
+(IMPROVEMENT_PHASES Phase B) is the guard that would have.

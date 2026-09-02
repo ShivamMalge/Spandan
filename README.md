@@ -80,6 +80,10 @@ spandan explain --flag-id <txn_id>           # analyst-facing explanation for on
 spandan validate-cassettes                   # grounding verdict per recorded explanation
 ```
 
+`spandan` is a console script installed by `make setup`; if a shell cannot find it
+(a stale install, or `Scripts/` not on `PATH`), every command works as
+`python -m spandan.cli <command> ...` with no other change.
+
 Every figure in the results table above except the throughput row is reproduced
 exactly by `make eval` on a fresh clone — two runs four days apart diff
 identically. The throughput, latency and memory figures come from `make bench`,
