@@ -131,3 +131,136 @@ An independent availability check could not open every registry page, so **Shiva
 - **Project-name availability was not fully verifiable** across PyPI and crates.io (only *Vega* was confirmed taken); confirm the chosen name before publishing the repo.
 - Fraud statistics vary by source and reporting window (RBI annual figures, CPFIR/Lok Sabha disclosures, NPCI/PIB releases, and private surveillance vendors differ); treat them as directional and cite the specific source used in the pitch. The ₹485 crore / 6.32 lakh figure is H1 FY2024-25 (Apr–Sep 2024), not a full year.
 - MuleHunter.AI accuracy figures (RBIH's "85%+"; Canara Bank's "95%") come from RBI/vendor statements, not an independent audit; RBI has declined RTI requests for aggregate mule-detection outcomes.
+
+---
+
+## Addendum, Sep 2 — the judging criteria, the field, and "graph engineering"
+
+Written two days before submission, after the official page and the public
+field were checked directly. Sources are at the end of each paragraph; nothing
+below is asserted from memory.
+
+### What the official page says
+
+Track 2, "AI Risk Manager", verbatim: *"Stop the merchant losing money to
+fraud, returns and chargebacks."* The bar: *"Honest metrics including
+false-positive cost. Strictly defense-only: anything offense-capable is
+disqualified."* Submission: *"show your work (a public repo, a 5 minute pitch
+video, the architecture)."* (razorpay.com/buildathon)
+
+The official page does **not** list named evaluation criteria. Two independent
+secondary write-ups report four, with matching wording — **Problem Taste**
+("a meaningful, real-world financial or merchant problem"), **Build Quality**
+("clean repository structure, execution reliability, and code trust"),
+**AI Judgment** ("utilizing AI models appropriately while opting for
+deterministic solutions where AI is unnecessary"), and **Failure Recovery**
+("showing what broke during development and how it was resolved") — and one
+adds: *"If you force an LLM into a problem that a simple rule-based system would
+solve better, you will be marked down."* Treated here as well-sourced but
+secondary. (careersincloud.com; careerstn.com)
+
+### What that means for this submission
+
+Three of the four reported criteria are things this repository already does
+and does not yet *say* where a judge would look:
+
+- **AI Judgment** is the poisoned-import test: the evaluation runs
+  bit-identically with the LLM package unimportable, and the one LLM node is
+  now behind a validator that rejected 2 of 2 recorded notes. This is the
+  strongest available demonstration of "deterministic where AI is unnecessary",
+  and the README mentions it in a Method bullet near the bottom.
+- **Failure Recovery** is `BUILD_LOG.md`: eleven entries, each with the wrong
+  diagnosis stated before the right one. The README does not link it under
+  that name.
+- **Problem Taste** is the loss class and the rupee model. Present and leading.
+- **Build Quality** is the only one with real gaps: dead code in the harness,
+  no CI, and — found this week — an undeclared `maturin` that broke
+  `make setup` on any clean machine.
+
+### The field, from a public competitor
+
+One Track 2 submission is public on GitHub. It claims **precision 94.8%,
+recall 91.2%, ROC-AUC 0.984, false-positive rate 0.16%, and a "104.6× Net
+ROI"** — all on a 50,000-sample synthetic corpus with a ~4% positive rate, no
+held-out split described, no unit tests documented, and an LLM "forensic
+agent" that its README describes without implementation detail. It has an
+`/attack-simulator`, an `/audit-log` page, and a latency fallback from its
+async tier to its sync tier. (github.com/SS072/Rezorpay)
+
+A second, from a LinkedIn post: a multi-agent system in which *"Claude API acts
+as the orchestrator — it scores each event by rupee impact, estimates recovery
+probability, picks the right agent, and decides the exact intervention"*, with
+an audit trail written before execution, stopping rules and cooldowns, a
+dashboard, and no numbers of any kind. "Still building. Shipping soon."
+
+Read against the reported criteria, both are exposed on the same axis: an LLM
+deciding monetary actions is precisely what "AI Judgment" is described as
+marking down, and 94.8% precision on a 4%-positive synthetic set is the
+generator's-rate number this project refuses to lead with (0.4462 here, 0.0824
+at a realistic base rate). What both have that this project lacks is an
+**explicit post-detection decision layer** — what happens after a flag, with
+bounded actions, cooldowns, kill-switches and an audit record — presented as an
+artifact rather than prose. Spandan has the pieces (dedup, budget, validator,
+template fallback) and no object that is the layer.
+
+### What production does
+
+Stripe's card-testing guidance: *"simple firewall rules or filters based on a
+single heuristic such as IP addresses are usually not sufficient"*; mitigations
+are layered — rate limits, CAPTCHA, velocity rules, login gating — and combined
+so that *"the first payment attempt from an IP address succeeds without
+restriction, but subsequent requests… require a CAPTCHA"*. Two lines matter
+for this project's failure modes: card testing is identified by *"a spike in
+failed or blocked payments"* — the same signal an issuer outage produces — and
+*"excessive retries (dunning) of payments can look like card testing"*, which
+is the §2.2 retry-structure problem stated from the other side. Production
+systems do not resolve this with a better detector; they resolve it with
+**graduated responses** (allow → step-up → block) and **stopping behaviour**,
+not a single decline threshold. (docs.stripe.com/disputes/prevention/card-testing)
+
+### "Graph engineering", and what it is not
+
+Anthropic's own guidance separates *workflows* — "LLMs and tools orchestrated
+through predefined code paths" — from *agents* — "systems where LLMs
+dynamically direct their own processes", and says: *"Start with simple
+prompts, optimize them with comprehensive evaluation, and add multi-step
+agentic systems only when simpler solutions fall short."* Agents "trade
+latency and cost for better task performance" and carry "the potential for
+compounding errors." (anthropic.com/research/building-effective-agents)
+
+LangGraph's model of a graph: *"Nodes are functions that encode the logic of
+your agents"*, *"Edges are functions that determine which Node to execute next
+based on the current state"*, conditional edges route on state, checkpointing
+persists state at step boundaries, and `interrupt()` pauses for a human.
+Nodes are plain functions; nothing requires a node to be an LLM.
+(docs.langchain.com/oss/python/langgraph/graph-api)
+
+Put together: the discipline of graph engineering — explicit nodes, explicit
+routing, shared typed state, the diagram derived from the declaration — is
+valuable here, and it is valuable *because* it makes the LLM's position in the
+graph a checkable property rather than a promise. A graph in which the LLM
+node has exactly one outgoing edge, into a validator, and no path to any
+action node, is the poisoned-import boundary stated as topology. A graph in
+which Claude *is* the router deciding declines is the thing the reported
+criteria mark down. The framework is not the point; a dependency on one would
+be the wrong kind of AI judgment for a numpy-only runtime. Declare the graph
+in ~150 lines, validate it at import, render mermaid *from* it so the diagram
+cannot drift, and test its topology.
+
+### The recommendation
+
+Add a **deterministic triage graph** as the post-detection layer — Phase H in
+`IMPROVEMENT_PHASES.md` — with an append-only audit record written *before*
+any action, a per-(merchant, BIN) **kill-switch** that degrades inline
+decline to alert-only when declines run hot, and the LLM node structurally
+leaf-only behind the validator. Then **measure it through the existing
+harness**: the kill-switch is a routing change, not a detector change, and its
+effect on the outage control's legitimate-decline rate is a number `make eval`
+can print beside the raw one, the same way the constrained threshold was
+reported beside the unconstrained. That single addition answers Failure
+Recovery (a graceful fallback that is measured, not described), AI Judgment
+(the boundary as topology, with a test), and Build Quality (a tested artifact
+where competitors have prose), and gives the pitch video something to show.
+
+What not to do, on the same evidence: chase the competitor's 94.8%. It is the
+number this project has already explained.

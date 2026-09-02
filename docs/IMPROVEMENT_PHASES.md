@@ -407,22 +407,121 @@ submit with hours to spare. **Nothing new starts on Sep 5 after 14:00.**
 
 ---
 
+## Phase H — The triage graph (Sep 3–4, ~7h, low risk to the detector, new artifact)
+
+**Why this phase exists.** `docs/RESEARCH.md`, Sep 2 addendum: the reported
+criteria reward *Failure Recovery* (a graceful fallback, shown) and *AI Judgment*
+(deterministic where AI is unnecessary; LLM-decides-money is marked down); the
+public field shows post-detection decision layers presented as artifacts with
+audit trails and stopping rules. Spandan has every piece of such a layer and no
+object that *is* the layer. This phase builds it as an explicit, deterministic
+graph — nodes are functions, edges are routing functions, the LLM node is
+leaf-only behind the validator, and the diagram is rendered from the
+declaration so it cannot drift.
+
+**Goal.** A judge can point at one module and one diagram and see: what
+happens after a flag, why, in what order, where a human is interrupted, where
+the system stops itself, and that the LLM cannot reach an action. And one
+number that did not exist before: the outage control's legitimate-decline rate
+*with the kill-switch*, printed by `make eval` beside the raw one.
+
+**In scope.**
+
+1. **`python/spandan/triage/graph.py` — the declaration.** A typed `TriageState`
+   (the frozen `Flag`, the running per-(merchant, BIN) counters, the decision so
+   far, the audit entries). Nodes as plain functions `state -> state`:
+   `dedup` (15-min cooldown per merchant+BIN — already `metrics.alerts` logic,
+   now a node), `budget_gate` (alerts/day), `exposure` (rupee at risk from the
+   existing cost model), `kill_switch` (below), `mode` (inline-decline vs
+   alert-only from the operating point), `explain` (the LLM node), `ground`
+   (the validator), `template`, `human_review` (an interrupt: the state is
+   written and execution stops), `act`, `audit`. Edges as an explicit table of
+   `(node, routing_fn)`; `compile()` validates at import: every edge target
+   exists, every node is reachable from START, every path reaches END, and
+   **no path exists from `explain` to `act`** — the boundary as topology.
+   No framework: nodes are functions, the runtime stays numpy-only.
+
+2. **The audit record, written before the action.** Every node transition
+   appends one JSON line — flag id, node, decision, reason, inputs it read,
+   timestamp from the event stream (not the wall clock, so the trail is
+   byte-identical across runs) — to `data/audit.jsonl`. `act` refuses to run
+   unless the entry for its own decision is already on disk. Deterministic
+   and replayable, like everything else here.
+
+3. **The kill-switch.** Per (merchant, BIN): if inline declines in the trailing
+   hour exceed `costs.toml [operations] max_declines_per_hour` (registered
+   *before* it is measured, with a stated basis — the same discipline as the
+   alert budget), route to alert-only for a cooldown and audit the trip. This
+   is graceful degradation aimed at the measured worst failure: during a
+   single-merchant issuer outage the detector keeps scoring, stops declining,
+   and says so. It is a **routing** change; `reference.py` and the Rust core
+   are untouched.
+
+4. **Measure it.** The harness gains `--triage`: scores are unchanged, but
+   "declined" is computed through the graph. `make eval` prints, beside the
+   existing rows, the legitimate-decline rate and the outage control's flagged
+   *and declined* counts with the kill-switch, and the number of trips. Report
+   in FAILURE_MODES §2.1 as a routing result, explicitly not a detector result,
+   the way §0.1 reported the constrained threshold beside the unconstrained.
+
+5. **Render from the declaration.** `python -m spandan.triage.graph --mermaid`
+   emits the diagram; `scripts/check_figures.py` (Phase B) also diffs it
+   against the block in the README so the picture cannot drift from the code.
+
+**Explicitly out of scope.** Any LLM routing decision. Any new action beyond
+decline / alert / hold-for-review. A dashboard. A queue. A framework
+dependency. Any change to scoring.
+
+**Acceptance criteria.**
+
+```
+git diff --stat -- python/spandan/detect spandan-core             # EMPTY
+pytest tests/test_triage.py -v
+  #   test_graph_compiles_and_every_node_is_reachable
+  #   test_no_path_from_explain_to_act              <- the boundary as topology
+  #   test_llm_node_has_exactly_one_outgoing_edge_into_ground
+  #   test_audit_entry_exists_before_act_runs
+  #   test_audit_trail_is_byte_identical_across_runs
+  #   test_kill_switch_trips_on_the_outage_control_and_not_on_burst
+  #   test_human_review_interrupt_halts_and_persists_state
+  #   test_triage_never_changes_a_score              <- scores in == scores out
+make eval SEEDS=1 2>&1 | grep -A6 "TRIAGE"                        # the new rows
+python -m spandan.triage.graph --mermaid > /tmp/g.mmd && grep -c "explain --> ground" /tmp/g.mmd   # 1
+python scripts/check_figures.py                                   # PASS
+```
+
+**Effort.** ~7h. **Risk: low to the detector** (untouched, asserted), **medium
+to the schedule** — this displaces Phase C and Phase E if time is short (see
+the cut list). Gains: Failure Recovery from "in BUILD_LOG" to "measured, with a
+switch"; AI Judgment from a test to a topology; Build Quality (a tested
+artifact); axis 8 (the demo has a centrepiece). Score after: ~86.
+
+**Why this outranks the learned baseline (Phase C) with two days left.** The
+reported criteria name failure recovery and AI judgment; neither names a
+baseline comparison. A technical panel will still ask for the baseline, and
+`docs/AUDIT.md` still lists it as the top exposure — but a judge scoring the
+published criteria gets more from a measured kill-switch than from a logistic
+regression. If both fit, do both. If one must go, C goes.
+
 ## Schedule
 
 | When | Phase | Hours | Risk | Score after |
 |---|---|---|---|---|
 | Sep 3 AM | A — framing | 3.5 | none | 74 |
 | Sep 3 PM | B — hygiene, CI, checker | 3 | low | 77 |
-| Sep 4 AM | C — learned baseline | 4 | low | 80 |
-| Sep 4 PM | D — validator | 3 | low | 83 |
-| Sep 4 eve | E part 1 — measured fix | 3 | low | 84 |
-| Sep 5 AM | E part 2 go/no-go, then F — demo | 2 (+6 if E ships) | high if E ships | 85 (88) |
+| Sep 3 PM–Sep 4 AM | **H — triage graph** (D part 1 is done) | 7 | low | 83 |
+| Sep 4 PM | C — learned baseline *(if time)* | 4 | low | 86 |
+| Sep 4 eve | E part 1 — measured fix *(if time)* | 3 | low | 87 |
+| Sep 5 AM | F — demo (the graph and the audit trail are the centrepiece) | 2 | none | 88 |
 | Sep 5 PM | G — verify, submit | 2 | none | — |
 
 **If time runs short, cut from the bottom of this list, never from the top:**
-E part 2 first, then E part 1, then D's second pair of cassettes, then C's GBM
-(keep the logistic regression). Phases A, B and F are never cut — they are the
-cheapest points in the plan and they carry no risk to what is already green.
+E part 2 first, then E part 1, then C entirely, then H's kill-switch measurement
+(keep the graph, the audit trail and the topology tests — those are the
+artifact). Phases A, B and F are never cut — they are the cheapest points in the
+plan and they carry no risk to what is already green. H's graph itself is not
+cut once started: a half-built triage layer is worse than none, so H is either
+completed to its acceptance criteria or reverted in one commit.
 
 ## What this plan will not do, and why
 
