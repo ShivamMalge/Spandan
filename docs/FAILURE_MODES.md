@@ -68,9 +68,17 @@ So the number that decides deployability is not alerts/day. It is the share of
 | 50 | 18.3 | 1.62% | 62 |
 
 **At the headline operating point the detector declines roughly 1 in 71
-legitimate transactions.** Card-not-present false-decline rates in the industry
-already run at a few percent, so this is not a rounding error on top — it is a
-comparable amount again. **This detector is not deployable as an inline control
+legitimate transactions.** For scale: Datos Insights puts the average
+e-commerce false-decline rate — "the fraudulent decline of a valid transaction"
+— at **1.51% of e-commerce sales**, "representing lost e-commerce revenue of
+nearly US$265 billion by 2027" (*E-Commerce Fraud Landscape and Trends:
+Merchants Seeking to Adapt*, Mattei and Inhofe, May 2024, from a survey of 200
+U.S. and U.K. merchants; published via Visa Acceptance Solutions). That figure
+is dollar-weighted, this one is per transaction, and the survey is not Indian —
+so they are not the same unit or market. But at 1.41% this detector alone would
+add roughly the entire industry average again on top of whatever a merchant
+already loses to false declines. It is not a rounding error; it is a comparable
+amount. **This detector is not deployable as an inline control
 at any alert budget**, and no tightening of the alert queue fixes it, because the
 alert queue was never what was hurting the merchant.
 
@@ -226,6 +234,19 @@ against. Re-registering the budget is a legitimate Phase 6 decision **provided i
 is argued from the operational basis and not from this column.**
 
 This is a **sensitivity analysis, not a menu.**
+
+**The configuration this project would ship is not the headline row.** Inline
+blocking is not deployable at any budget (*What a flag does*). Alert-only at
+budget 2 is: 2.1 alerts/day, event precision 0.696, precision 0.2034 at a 0.15%
+base rate, 35 of 60 episodes surfaced, and 1 in 271 legitimate transactions
+flagged rather than 1 in 71. It is chosen from this table on its operational
+basis — what one analyst can review with attention — and not on its test column.
+The caveat stands and is the reason it was never the headline: with flags
+notifying rather than declining, neither the blocked-good cost nor the
+avoided-chargeback saving can be claimed, because nothing is prevented until a
+human acts and this project has no response-time model. The rupee figures in
+this document do not transfer to it. What transfers is the detection: 58% of
+campaigns in front of a human at two items a day.
 
 ---
 

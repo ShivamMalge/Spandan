@@ -28,3 +28,6 @@ venv/
 # Stray duplicates of tracked docs, pending a decision on their fate.
 # NOT deleted (agents.md 1) - they remain on disk in docs/.
 docs/*.md.bak
+
+# Candidate preparation (interview Q&A, pitch checklist): kept on disk, not shipped.
+/prep/

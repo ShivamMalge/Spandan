@@ -4,6 +4,14 @@ A deterministic streaming detector for card-testing and velocity abuse on card
 authorization traffic, with a Rust core, a bit-exact Python reference, and an
 evaluation harness that prices its own false positives in rupees.
 
+**In fifteen seconds.** Precision **0.0824** at a realistic 0.15% base rate —
+eleven false alarms per catch. As an inline control it declines **1 in 71**
+legitimate customers, which is not deployable. The configuration this project
+would ship is alert-only at budget 2: 2.1 alerts a day, 35 of 60 attack episodes
+surfaced, 1 in 271 flagged. The one measured failure is a single-merchant issuer
+outage, 50.5% of which is flagged as card testing; its fix is diagnosed and
+unbuilt. Every figure here reproduces from `make eval` on a fresh clone.
+
 ## The problem
 
 Stolen card numbers are worthless until someone knows which ones still work. The
@@ -19,6 +27,32 @@ Spandan scores each authorization attempt against per-entity baselines it learns
 from the stream, and **a flag declines the transaction** — it is an inline
 authorization control, not a notification. Alerts are the human-facing grouping of
 those declines per (merchant, BIN), not a softer separate action.
+
+## Against the Track 2 bar
+
+The track asks for a detector for one class of loss, with measured precision and
+recall on a held-out test set, honest metrics including false-positive cost, and
+strictly defense-only. Where each clause is met, and what proves it:
+
+| clause | where | proof |
+|---|---|---|
+| one class of loss | card testing and velocity abuse; three attack signatures, three negative controls ([ASSUMPTIONS.md](python/spandan/gen/ASSUMPTIONS.md) §1.7) | `make eval` per-scenario table |
+| held-out test set | temporal split, day-50 wall; every tunable chosen on validation; alert budget registered before test was read (`e5b48f8`) | `test_loader_rejects_nontemporal_split`, `test_threshold_selection_never_touches_test_window` |
+| measured precision and recall | three precisions, the least flattering leading; recall 0.8444; 60/60 episodes | `make eval`; two runs four days apart diff identical |
+| false-positive cost | rupee model with every assumption labelled; break-even ₹613/alert as an output; 1 in 71 legitimate customers declined | [`costs.toml`](python/spandan/eval/costs.toml); `make eval` |
+| defense-only | reserved-range identifiers, no card number anywhere, scenarios as statistical signatures only | `test_all_identifiers_synthetic`, `test_no_card_reference_could_be_mistaken_for_a_pan` |
+| show your work | this file, [ARCHITECTURE.md](docs/ARCHITECTURE.md), [BUILD_LOG.md](docs/BUILD_LOG.md) | fresh clone: `make setup && make all`, `git status --porcelain` empty |
+
+Four evaluation criteria are reported for this buildathon by secondary
+coverage — not on the official page, so treated as reported. Where each lives:
+**Problem taste** — the loss class and the rupee model, above. **Build quality**
+— 95 Python and 33 Rust tests, two engines bit-exact over 1.6M events,
+reproduction from a fresh clone. **AI judgment** — the language model is
+structurally unable to reach a number and its notes are validated; see *Where
+AI is*. **Failure recovery** — [BUILD_LOG.md](docs/BUILD_LOG.md): eleven entries,
+each with the wrong diagnosis written before the right one, and
+`spandan replay --cold-start` demonstrates a failure mode live rather than
+describing it.
 
 ## Results
 
@@ -53,7 +87,20 @@ stays positive only while an alert review costs under ₹613.
 **Two results, and they are separate claims.** It detects every attack episode, and
 fast — 60/60, p90 of 32 events on burst episodes of 190–300. And at a realistic base
 rate it declines 1 in 71 legitimate customers, which is not deployable as an inline
-control. The reason is one measured failure, below.
+control — for scale, Datos Insights puts the industry-wide e-commerce false-decline
+rate at 1.51% of sales (2024), so this detector alone would add about that much
+again. The reason is one measured failure, below.
+
+**What this project would ship.** Inline blocking is not deployable at any alert
+budget. The configuration it would ship is **alert-only at budget 2**: event
+precision 0.696, precision 0.2034 at a 0.15% base rate, 2.1 alerts/day, 35 of 60
+episodes caught, and 0.37% of legitimate traffic flagged — **1 in 271** rather than
+1 in 71. One analyst reviewing two items a day surfaces 58% of campaigns. The
+caveat travels with it: with flags notifying rather than declining, nothing is
+prevented until a human acts, this project has no response-time model, and so
+neither the blocked-good cost nor the avoided-chargeback saving can be claimed —
+the ₹348,845 net is an inline-blocking figure and does not transfer. Full frontier
+in [FAILURE_MODES.md](docs/FAILURE_MODES.md) §0.1.
 
 ## Run it
 
@@ -298,6 +345,31 @@ blocked good transactions. It does not price scheme monitoring-programme costs,
 merchant reputation, or customer trust — so the worst failure above costs only
 ₹11,077 in the model, because outage traffic was mostly declining anyway. That is a
 statement about the cost model, not about the severity of the failure.
+
+## Where AI is, and where it is forbidden
+
+One language model, one task: turn a flag into a triage note an analyst can act
+on or dismiss in five seconds. It sits outside the code that produces numbers,
+and that is proven rather than promised: `spandan.detect` and `spandan.eval`
+cannot import it, and the full evaluation runs bit-identically with `spandan.llm`
+replaced by an object that raises on any attribute access. `Flag` is frozen; the
+model receives a copy and has no write path back.
+
+Measured, it fabricated. Both recorded notes conditioned their next action on
+evidence this pipeline does not have — a CVV/AVS result, per-card history, a
+cardholder IP — after a prompt stating that the evidence shown was everything
+known. The model's output therefore passes through a validator that rejects any
+note citing evidence outside the prompt it was generated from: 2 of 2 recorded
+notes rejected, the deterministic template accepted by construction, and
+`explain_flag` returns a model note only when it is grounded. The cassettes are
+committed exactly as returned; re-prompting for a nicer sample would be selecting
+on the test set.
+
+The reasoning behind the placement: the decision to decline a payment is a
+threshold comparison on six terms with a written summation order, chosen on
+validation under a pre-registered budget. Nothing in it needs a model, and the
+one model in the system has been shown to invent evidence. Detail in
+[FAILURE_MODES.md](docs/FAILURE_MODES.md) §8.
 
 ## Method
 
