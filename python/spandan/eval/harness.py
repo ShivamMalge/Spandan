@@ -792,6 +792,12 @@ def main(argv: list[str] | None = None) -> int:
         default="python",
         help="which detector core scores the stream; the numbers must not depend on it",
     )
+    parser.add_argument(
+        "--triage-mode",
+        choices=("inline", "alert_only", "off"),
+        default="inline",
+        help="run the post-detection graph over the test window; scores are unchanged either way",
+    )
     args = parser.parse_args(argv)
 
     global ACTIVE_ENGINE
@@ -817,15 +823,29 @@ def main(argv: list[str] | None = None) -> int:
     render_frontier(run_budget_frontier(split, config, model, episode_windows), model)
     render_sweep(result, model)
 
+    triage = None
+    if args.triage_mode != "off":
+        from .triage_report import AUDIT_FILENAME, render_triage, run_triage
+
+        triage = run_triage(
+            split, result["test_scores"], result["threshold"], model, config,
+            mode=args.triage_mode, audit_path=data_dir / AUDIT_FILENAME,
+        )
+        render_triage(triage)
+
     rows = run_seed_matrix(args.seeds, manifest["seed"], config, model)
     render_ablation_matrix(rows, args.seeds)
     render_multiseed(rows)
     render_verdict(result, rows, model)
 
     if args.json_out:
+        summary = summarise(result, rows)
+        if triage is not None:
+            from .triage_report import summarise_triage
+
+            summary["triage"] = summarise_triage(triage)
         Path(args.json_out).write_text(
-            json.dumps(summarise(result, rows), indent=2, sort_keys=True),
-            encoding="utf-8",
+            json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8"
         )
     return 0
 

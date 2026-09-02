@@ -79,3 +79,28 @@ interesting part of the trade-off unsampled. The HEADLINE uses
 `alerts_per_day_budget` only. The rest of the frontier is reported so the
 trade-off is visible - it is NOT a menu to pick the flattering row from after
 seeing test results."""
+
+kill_switch_retry_ratio = 2.5
+kill_switch_min_events = 20
+kill_switch_cooldown_ms = 3600000
+kill_switch_basis = """The triage graph degrades inline decline to alert-only for one
+(merchant, BIN) when, over the trailing hour, attempts per distinct card exceed
+`kill_switch_retry_ratio` with at least `kill_switch_min_events` in the window,
+and holds alert-only for `kill_switch_cooldown_ms` after the trip.
+
+REGISTERED 2026-09-03 BEFORE ANY MEASUREMENT ON THE TEST WINDOW, from the training
+window only. Why this signal: FAILURE_MODES 2.2 shows the retry structure that
+separates an issuer outage from a probe run is invisible at the detector's
+5-minute window but present over an hour. Measured on TRAIN, per (merchant, BIN)
+episode, the maximum trailing-hour attempts-per-distinct-card ratio was:
+burst 1.52-1.65, rotating 1.51-1.65, slow_low never reaches 20 events in an hour,
+issuer_outage (multi-merchant, retries spread across 4-5 keys) 1.22-1.55,
+outage_single_merchant 3.68-5.41. Every attack stays at or below 1.65; the control
+this switch exists for starts at 3.68. 2.5 sits with at least 0.85 of clearance on
+each side. The minimum-events floor is the same floor the analysis used.
+
+This is a ROUTING parameter, not a detector parameter: scores are unchanged, the
+detector is frozen, and the switch decides only whether a flag declines or alerts.
+Its effect on the test window is reported in FAILURE_MODES 2.1 beside the raw
+figures, and was not known when this value was chosen. Whatever it turns out to
+be, this value is not moved afterwards."""

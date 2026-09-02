@@ -380,6 +380,57 @@ Consequences, stated plainly:
   false-positive case a risk panel raises, and the honest answer today is that
   the detector fails it.
 
+### 2.1a With the triage graph: a routing result, not a detector result
+
+The detector is frozen and every score above is unchanged. What changed is
+what a flag *becomes*. `python/spandan/triage/` routes each flag through an
+explicit graph (`docs/ARCHITECTURE.md` step 4), and one node — the
+kill-switch — turns inline decline into alert-only for a single (merchant,
+BIN) when the trailing hour shows the retry structure of an outage: attempts
+per distinct card ≥ 2.5 over ≥ 20 events, holding for an hour. The
+parameters were chosen on the **training** window and registered in
+`costs.toml` before this table existed (basis there); the test result was
+not known when the value was set, and the value was not moved afterwards.
+
+| test window, seed 20260824 | raw (every flag declines) | through the graph |
+|---|---|---|
+| `outage_single_merchant` flagged → declined | 9,170 → 9,170 | 9,170 → **5,723** (3,447 alerted) |
+| kill-switch trips | — | **20**, all on `outage_single_merchant`, none on any attack |
+| legitimate transactions declined | 1.41%, **1 in 71** | 0.98%, **1 in 102** |
+| false positives that declined | 11,216 | **7,769** |
+| true positives that declined | 9,038 | **9,038** — unchanged |
+| burst / rotating / slow_low flagged → declined | 4,514 / 4,014 / 510 | 4,514 / 4,014 / 510 — unchanged |
+| blocked-good cost | ₹252,220 | ₹248,119 |
+| gross before review | ₹298,631 | ₹302,732 |
+
+Three things this table says.
+
+**The switch fires on exactly the traffic it was registered for.** Twenty
+trips, one per single-merchant outage episode, and not one on the sixty
+attack episodes. Every attack event the detector flagged still declines, so
+recall through the action is untouched — a count-based switch would have hit
+the bursts first; the retry ratio does not.
+
+**It is a recovery, not a fix, and it is late by construction.** 3,447 of
+11,216 false declines — 31% — become alerts. The rest decline before the
+switch can see them: it needs enough of the hour to accumulate for the
+retry ratio to clear 2.5 on ≥ 20 events, so the opening of each outage
+episode is declined regardless. 1 in 102 is materially better than 1 in 71
+and it is still not deployable as an inline control. The headline stands.
+
+**The rupee model barely notices, for the reason §6 gives.** Blocked-good
+cost moves ₹4,101 on 3,447 recovered declines, because outage traffic was
+mostly going to decline anyway and the model charges no margin for it. The
+cost model cannot see this improvement; the decline rate can. Which is one
+more reason the decline rate, not the rupee figure, is the deployability
+number.
+
+This is the §7 recommendation-1 signal — retry structure over a long
+horizon — placed in the routing layer instead of the scoring function. It
+does what a routing rule can do with it. What it cannot do is score with
+it: a detector that saw the retry ratio inside its own window would flag
+less rather than decline less, and that remains the unbuilt fix.
+
 ### 2.2 The retry separator is invisible at the window size chosen
 
 The design intent was that retries distinguish an outage from a probe run: an
@@ -609,6 +660,14 @@ Ordered by how much they change the credibility of the submission:
    in-window attempts per card for an outage against 1.22 for a burst — the
    damping term points the wrong way), and there was not enough runway to build
    and re-validate it without putting the port at risk.
+
+   **Partially realised in routing, Phase H.** The same signal — attempts per
+   distinct card over a trailing hour — now drives the triage graph's
+   kill-switch (§2.1a): 20 of 20 single-merchant outage episodes trip it,
+   no attack does, and the legitimate-decline rate moves from 1 in 71 to
+   1 in 102 without touching a score. That is what the signal can do as a
+   routing rule. The detector-level fix, which would stop the flags rather
+   than the declines, is still unbuilt.
 2. **Model alert fatigue, or stop reporting net rupees as the deciding metric**
    (§3.1). Linear review cost is why the cost model cannot separate the variants.
 3. **Add an event-level flag-rate constraint** alongside the alerts/day budget,

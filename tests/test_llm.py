@@ -99,6 +99,7 @@ def test_detect_and_eval_import_graphs_exclude_spandan_llm():
     importlib.import_module("spandan.eval.costs")
     importlib.import_module("spandan.detect.reference")
     importlib.import_module("spandan.detect.rust_engine")
+    importlib.import_module("spandan.triage.graph")   # the post-detection layer too
 
     offenders = [m for m in sys.modules if m.startswith("spandan.llm")]
     assert not offenders, (
@@ -142,11 +143,16 @@ def test_eval_runs_with_llm_import_poisoned(tmp_path):
     model = CostModel.load()
     config = DetectorConfig()
 
+    from spandan.eval.triage_report import run_triage
+
     def run_full_eval():
         validation, test = score_split_once(split, config)
         rows = sweep_thresholds(split.validation, validation, model)
         chosen = select_threshold(rows, model.alerts_per_day_budget)
-        return validation, test, chosen["threshold"]
+        # The post-detection graph runs here too: it must decide what every flag
+        # becomes without the LLM package existing.
+        triage = run_triage(split, test, chosen["threshold"], model, config)
+        return validation, test, chosen["threshold"], triage["declined"], triage["audit_entries"]
 
     poison = _PoisonedModule()
     saved = {m: sys.modules[m] for m in list(sys.modules) if m.startswith("spandan.llm")}
@@ -157,17 +163,19 @@ def test_eval_runs_with_llm_import_poisoned(tmp_path):
         for sub in ("provider", "explain", "grounding"):
             sys.modules[f"spandan.llm.{sub}"] = poison  # type: ignore[assignment]
 
-        poisoned_validation, poisoned_test, poisoned_threshold = run_full_eval()
+        poisoned = run_full_eval()
     finally:
         for name in [m for m in sys.modules if m.startswith("spandan.llm")]:
             del sys.modules[name]
         sys.modules.update(saved)
 
-    clean_validation, clean_test, clean_threshold = run_full_eval()
+    clean = run_full_eval()
 
-    assert np.array_equal(poisoned_validation, clean_validation)
-    assert np.array_equal(poisoned_test, clean_test)
-    assert poisoned_threshold == clean_threshold
+    assert np.array_equal(poisoned[0], clean[0])
+    assert np.array_equal(poisoned[1], clean[1])
+    assert poisoned[2] == clean[2]
+    assert poisoned[3] == clean[3] and poisoned[4] == clean[4], "triage decisions must not depend on the LLM package"
+    assert poisoned[4] > 0, "the triage graph ran and audited"
 
     with pytest.raises(AssertionError, match="language model"):
         _ = poison.complete  # the poison itself must actually bite

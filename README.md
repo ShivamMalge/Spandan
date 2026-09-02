@@ -9,8 +9,10 @@ eleven false alarms per catch. As an inline control it declines **1 in 71**
 legitimate customers, which is not deployable. The configuration this project
 would ship is alert-only at budget 2: 2.1 alerts a day, 35 of 60 attack episodes
 surfaced, 1 in 271 flagged. The one measured failure is a single-merchant issuer
-outage, 50.5% of which is flagged as card testing; its fix is diagnosed and
-unbuilt. Every figure here reproduces from `make eval` on a fresh clone.
+outage, 50.5% of which is flagged as card testing; a kill-switch in the
+post-detection graph recovers 31% of those false declines (1 in 71 → 1 in 102)
+without touching a score, and the detector-level fix stays unbuilt. Every figure
+here reproduces from `make eval` on a fresh clone.
 
 ## The problem
 
@@ -46,13 +48,14 @@ strictly defense-only. Where each clause is met, and what proves it:
 Four evaluation criteria are reported for this buildathon by secondary
 coverage — not on the official page, so treated as reported. Where each lives:
 **Problem taste** — the loss class and the rupee model, above. **Build quality**
-— 95 Python and 33 Rust tests, two engines bit-exact over 1.6M events,
+— 118 Python and 33 Rust tests, two engines bit-exact over 1.6M events,
 reproduction from a fresh clone. **AI judgment** — the language model is
 structurally unable to reach a number and its notes are validated; see *Where
-AI is*. **Failure recovery** — [BUILD_LOG.md](docs/BUILD_LOG.md): eleven entries,
-each with the wrong diagnosis written before the right one, and
-`spandan replay --cold-start` demonstrates a failure mode live rather than
-describing it.
+AI is*. **Failure recovery** — [BUILD_LOG.md](docs/BUILD_LOG.md): twelve entries,
+each with the wrong diagnosis written before the right one;
+`spandan replay --cold-start` demonstrates a failure mode live; and the triage
+graph's kill-switch is a graceful degradation aimed at the measured worst
+failure, with its effect measured rather than described.
 
 ## Results
 
@@ -65,6 +68,7 @@ alerts/day budget fixed before the test window was read. Ranges in
 |---|---|
 | **precision @ 0.15% base rate** | **0.0824** — eleven false alarms per true catch |
 | **legitimate transactions declined** | **1.41%, or 1 in 71** |
+| legitimate declined, with the triage kill-switch | 0.98%, or 1 in 102 — routing, not detection |
 | precision @ generator's 1.33% rate | 0.4462 |
 | alert-level precision | 0.433 (211 real of 487 alerts) |
 | recall (event-level) | 0.8444 |
@@ -111,11 +115,11 @@ git clone <repo> spandan && cd spandan
 python -m venv .venv && . .venv/Scripts/activate    # Windows; use bin/activate on POSIX
 make setup                                          # pip install -e .[dev] + maturin build
 make data                                           # generate streams        ~2 min
-make eval                                           # full evaluation         ~12 min
+make eval                                           # full evaluation         ~14 min
 ```
 
 `make eval ENGINE=rust` runs the same evaluation through the Rust core and produces
-a byte-identical metrics JSON. `make test` runs 95 Python tests (~12 min, several
+a byte-identical metrics JSON. `make test` runs 118 Python tests (~13 min, several
 build streams and run full evaluations) and `cargo test` runs 33 Rust tests.
 `make bench` reproduces [docs/BENCH.md](docs/BENCH.md). `make all` chains data,
 test, eval and demo.
@@ -311,6 +315,79 @@ constant on an unbounded curve is polish, not the fix. The growth curve is the
 deployment blocker, and eviction or a sketch is what addresses it, each with an
 accuracy cost named in [FAILURE_MODES.md](docs/FAILURE_MODES.md) §7.
 
+## After a flag: the triage graph
+
+A flag is a score above a threshold. What it *becomes* — a decline, an alert, a
+hold for a person — is decided by an explicit graph in
+[`python/spandan/triage/`](python/spandan/triage/graph.py): nodes are plain
+functions over typed state, edges are routing functions declared with every name
+they may return, and the graph validates itself on import. The diagram below is
+rendered from the edge table (`spandan triage-graph --mermaid`) and a test
+asserts the two cannot differ.
+
+```mermaid
+%%{init: {"flowchart": {"wrappingWidth": 200, "nodeSpacing": 28, "rankSpacing": 44, "curve": "basis"}}}%%
+flowchart LR
+    START([flag]) --> dedup
+    dedup["dedup<br/>15-min cooldown"]
+    exposure["exposure<br/>rupee at risk"]
+    kill_switch["kill_switch<br/>retry ratio / hour"]
+    mode["<b>mode</b><br/>the decision"]
+    act["<b>act</b><br/>decline"]
+    human_review["human_review<br/>alert / hold"]
+    explain["explain<br/><b>the one LLM node</b>"]
+    ground["ground<br/>validator"]
+    template["template<br/>fallback"]
+    END([end])
+    dedup --> exposure
+    exposure --> kill_switch
+    kill_switch --> mode
+    mode --> act
+    mode --> human_review
+    act --> explain
+    human_review --> explain
+    human_review --> END
+    explain --> ground
+    ground --> END
+    ground --> template
+    template --> END
+    classDef plain fill:#4a4f57,color:#fff,stroke:#4a4f57
+    classDef llm fill:#3c3f45,color:#fff,stroke:#9aa0a6,stroke-width:2px
+    classDef decide fill:#a4262c,color:#fff,stroke:#a4262c
+    classDef guard fill:#1f4e79,color:#fff,stroke:#1f4e79
+    classDef term fill:#2f6b3a,color:#fff,stroke:#2f6b3a
+    class dedup,exposure,human_review,template plain
+    class explain llm
+    class mode,act decide
+    class ground,kill_switch guard
+    class START,END term
+```
+
+Three properties, each a test rather than a promise:
+
+- **No path from the language model to an action.** `mode` makes the decision
+  and audits it; `act` executes it; `explain` runs strictly afterwards and its
+  only successor is the validator. `test_no_path_from_explain_to_act` asserts it
+  on the topology, and the poisoned-import test runs this whole graph with
+  `spandan.llm` unimportable and gets identical decisions.
+- **The audit is written before the action.** Every transition appends one JSON
+  line — event-stream timestamps, sorted keys — to `data/audit.jsonl`; `act`
+  refuses to run unless its decision is already on the trail; the trail is
+  byte-identical across runs.
+- **It stops itself.** The kill-switch turns inline decline into alert-only for
+  one (merchant, BIN) when the trailing hour shows an outage's retry structure —
+  attempts per distinct card ≥ 2.5 over ≥ 20 events, the signal §2.2 of
+  FAILURE_MODES shows is invisible at five minutes. Chosen on the training
+  window, registered in `costs.toml` before the test result was known.
+
+Measured on the test window, scores unchanged: **20 trips, all on the
+single-merchant outage control, none on any attack**; every flagged attack still
+declines (true positives through the action 9,038 → 9,038); 3,447 of 11,216
+false declines become alerts; legitimate transactions declined **1 in 71 → 1 in
+102**. A recovery of 31%, late by construction — the switch cannot fire until the
+retries are visible — and not a fix. Detail in
+[FAILURE_MODES.md](docs/FAILURE_MODES.md) §2.1a.
+
 ## What it does not do
 
 Detail and measurements: [docs/FAILURE_MODES.md](docs/FAILURE_MODES.md).
@@ -435,8 +512,9 @@ spandan-core/src/     Rust core: ingest, state, velocity, baseline, score, pybri
 python/spandan/gen/   Synthetic stream generator + ASSUMPTIONS.md
 python/spandan/detect/  Detector interface, Python reference (the spec), Rust adapter, parity fixture
 python/spandan/eval/  Temporal loader, metrics, rupee cost model, evaluation harness, benchmarks
-python/spandan/llm/   Bounded explanation layer, cassettes, hand-written comparison target
-tests/                95 tests: generator, detector, cross-engine parity, evaluation, LLM boundary
+python/spandan/triage/  The post-detection graph: nodes, routing table, audit trail, kill-switch
+python/spandan/llm/   Bounded explanation layer, grounding validator, cassettes, comparison target
+tests/                118 tests: generator, detector, cross-engine parity, evaluation, triage graph, LLM boundary
 docs/                 ARCHITECTURE, FAILURE_MODES, BENCH, BUILD_LOG, PHASES
 ```
 

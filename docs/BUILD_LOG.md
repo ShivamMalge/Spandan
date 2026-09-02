@@ -387,3 +387,28 @@ was tried and rejected: maturin's PEP 517 metadata hook does not accept it.
 `make demo` uses `python -m spandan.cli` — so the acceptance run could not
 have caught a broken launcher. A CI job on a runner with no global tooling
 (IMPROVEMENT_PHASES Phase B) is the guard that would have.
+
+## 2026-09-03 — `make eval` ran past 25 minutes; the audit trail was being scanned end to end on every decline
+
+**Phase:** 6 (Phase H, the triage graph)
+**Symptom:** the first full `make eval` with the new triage pass had not
+finished after 25 minutes, against a normal 13. No error, no output — stdout
+was redirected to a file and buffered, so the run was silent.
+**First believed:** the extra streaming pass (the reference detector walked
+over 1.6M events to produce real `Flag`s for the graph) was simply slow, and
+the run just needed longer.
+**Actually wrong:** `TriageContext.has_recorded()`, which `act` calls to
+refuse running before its decision is audited, was a linear scan of the whole
+audit list — `any(e["txn_id"] == ... for e in self.audit)`. Roughly 9,000
+declines each scanning up to 162,000 entries: hundreds of millions of dict
+comparisons in Python. The guard that makes "audit before action" a hard
+property was O(n²) in the number of flags.
+**Fix:** a `(txn_id, node)` set maintained in `write()`; `has_recorded` is one
+set lookup. Output byte-identical; nothing about the graph changed.
+**Proved by:** the triage pass timed in isolation on the real test window:
+54 seconds, 20,254 flags, 162,032 audit entries. 17/17 tests unchanged.
+**Worth noting:** this was caught by a timeout, not by a test — the suite
+runs the graph over a 4-day fixture where the scan never hurt. A property
+that is correct and quadratic passes every correctness test there is. The
+guard was right; it was the data structure behind it that had not been
+thought about at 20,000 flags.

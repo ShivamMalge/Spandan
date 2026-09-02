@@ -448,14 +448,18 @@ number that did not exist before: the outage control's legitimate-decline rate
    unless the entry for its own decision is already on disk. Deterministic
    and replayable, like everything else here.
 
-3. **The kill-switch.** Per (merchant, BIN): if inline declines in the trailing
-   hour exceed `costs.toml [operations] max_declines_per_hour` (registered
-   *before* it is measured, with a stated basis — the same discipline as the
-   alert budget), route to alert-only for a cooldown and audit the trip. This
-   is graceful degradation aimed at the measured worst failure: during a
-   single-merchant issuer outage the detector keeps scoring, stops declining,
-   and says so. It is a **routing** change; `reference.py` and the Rust core
-   are untouched.
+3. **The kill-switch.** Per (merchant, BIN): not a decline count — a count
+   trips on every burst too. The trailing-hour **attempts per distinct card**
+   is the retry structure §2.2 shows separates an outage from a probe run at
+   sixty minutes and not at five. Measured on TRAIN only before anything on
+   test was read: attacks at or below 1.65, `outage_single_merchant` at
+   3.68–5.41. Registered in `costs.toml [operations]` as
+   `kill_switch_retry_ratio = 2.5` over `kill_switch_min_events = 20`, holding
+   alert-only for `kill_switch_cooldown_ms = 3600000`, with the basis written
+   beside it. Graceful degradation aimed at the measured worst failure: during
+   a single-merchant issuer outage the detector keeps scoring, stops declining,
+   and says so. A **routing** change; `reference.py` and the Rust core are
+   untouched.
 
 4. **Measure it.** The harness gains `--triage`: scores are unchanged, but
    "declined" is computed through the graph. `make eval` prints, beside the
@@ -476,19 +480,35 @@ dependency. Any change to scoring.
 
 ```
 git diff --stat -- python/spandan/detect spandan-core             # EMPTY
-pytest tests/test_triage.py -v
+pytest tests/test_triage.py -v                                   # 17 tests
   #   test_graph_compiles_and_every_node_is_reachable
   #   test_no_path_from_explain_to_act              <- the boundary as topology
   #   test_llm_node_has_exactly_one_outgoing_edge_into_ground
+  #   test_mermaid_is_rendered_from_the_declaration  <- diagram == edge table
   #   test_audit_entry_exists_before_act_runs
   #   test_audit_trail_is_byte_identical_across_runs
-  #   test_kill_switch_trips_on_the_outage_control_and_not_on_burst
+  #   test_kill_switch_trips_on_retry_structure_and_not_on_distinct_cards
+  #   test_kill_switch_holds_alert_only_for_the_cooldown_then_releases
+  #   test_alert_only_mode_declines_nothing
   #   test_human_review_interrupt_halts_and_persists_state
+  #   test_dedup_follows_the_alert_cooldown
+  #   test_explain_is_optional_and_grounding_gates_the_note
   #   test_triage_never_changes_a_score              <- scores in == scores out
-make eval SEEDS=1 2>&1 | grep -A6 "TRIAGE"                        # the new rows
-python -m spandan.triage.graph --mermaid > /tmp/g.mmd && grep -c "explain --> ground" /tmp/g.mmd   # 1
+  #   test_triage_package_does_not_import_the_llm_layer
+  #   test_no_node_reads_labels_or_scenario_ids
+  #   test_config_loads_registered_parameters_from_costs_toml
+pytest tests/test_llm.py::test_eval_runs_with_llm_import_poisoned   # now runs the triage pass under poison
+make eval 2>&1 | sed -n "/^TRIAGE/,/^This is a ROUTING/p"          # the new block
+spandan triage-graph --mermaid > /tmp/g.mmd && grep -c "explain --> ground" /tmp/g.mmd   # 1
 python scripts/check_figures.py                                   # PASS
 ```
+
+**Measured (Sep 3).** 20 trips, all on `outage_single_merchant`, none on any
+attack; attack declines unchanged (TP through action 9,038 → 9,038); false
+declines 11,216 → 7,769; legitimate-decline rate 1 in 71 → **1 in 102**. A 31%
+recovery, late by construction; reported in FAILURE_MODES §2.1a as a routing
+result. The graph, audit and topology tests shipped; 17 tests; poisoned-import
+test extended to run the graph under poison.
 
 **Effort.** ~7h. **Risk: low to the detector** (untouched, asserted), **medium
 to the schedule** — this displaces Phase C and Phase E if time is short (see

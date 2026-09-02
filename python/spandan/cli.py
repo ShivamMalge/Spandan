@@ -276,12 +276,36 @@ def validate_cassettes(argv: list[str] | None = None) -> int:
     return 0 if total else 1
 
 
+def triage_graph(argv: list[str] | None = None) -> int:
+    """`spandan triage-graph` - the post-detection graph, from its declaration.
+
+    `--mermaid` prints the diagram derived from the edge table, so the picture
+    in the README can be diffed against the code rather than drawn beside it.
+    Without flags, reports that the graph compiles and lists its nodes.
+    """
+    _utf8()
+    parser = argparse.ArgumentParser(prog="spandan triage-graph")
+    parser.add_argument("--mermaid", action="store_true", help="print the diagram derived from EDGES")
+    args = parser.parse_args(argv)
+
+    from .triage.graph import compile_graph, render_mermaid
+
+    info = compile_graph()
+    if args.mermaid:
+        sys.stdout.write(render_mermaid() + "\n")
+        return 0
+    print(f"graph compiles: {len(info['nodes'])} nodes, start={info['start']}, end={info['end']}")
+    print("  nodes: " + ", ".join(info["nodes"]))
+    print("  the LLM node (explain) has one successor (ground) and no path to act or mode")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="spandan", add_help=True)
     parser.add_argument(
         "command",
-        choices=("replay", "explain", "validate-cassettes"),
-        help="replay the stream, explain one flag, or validate the committed cassettes",
+        choices=("replay", "explain", "validate-cassettes", "triage-graph"),
+        help="replay the stream, explain one flag, validate the committed cassettes, or render the triage graph",
     )
     args, rest = parser.parse_known_args(argv)
     if args.command == "replay":
@@ -290,6 +314,8 @@ def main(argv: list[str] | None = None) -> int:
         return explain(rest)
     if args.command == "validate-cassettes":
         return validate_cassettes(rest)
+    if args.command == "triage-graph":
+        return triage_graph(rest)
     return 2
 
 

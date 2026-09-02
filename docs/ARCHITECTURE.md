@@ -45,8 +45,22 @@ every claim on an edge is enforced by a test named in the text that follows.
              -repetition, -merchant_span)
                               |
                               v
-        flag = score > threshold  ==>  DECLINES the transaction
-        alerts = flags deduped per (merchant, BIN), 15-min cooldown
+        flag = score > threshold
+                              |
+                              v
+            triage graph              python/spandan/triage/
+            ------------
+            dedup -> exposure -> kill_switch -> mode -+-> act (DECLINE)
+                                                       +-> human_review (alert / hold)
+            then, downstream of the decision only:  explain -> ground -> template
+            - nodes are functions, edges are routing functions, validated on
+              import; NO PATH from explain to act or mode (asserted)
+            - every transition audited BEFORE the action; act refuses to run
+              unaudited; the trail is byte-identical across runs
+            - kill_switch: trailing-hour attempts per distinct card on one
+              (merchant, BIN) >= 2.5 over >= 20 events -> alert-only for an
+              hour. Registered on TRAIN before it was measured (costs.toml)
+            - the explainer is INJECTED; this package never imports llm/
                               |
           +-------------------+----------------------+
           |                                          |
@@ -91,7 +105,22 @@ every claim on an edge is enforced by a test named in the text that follows.
    the decline rate on legitimate traffic (1 in 71) is the deployability
    number rather than the alert count.
 
-4. **Evaluation** (`python/spandan/eval/`). Temporal splits enforced by a
+4. **Triage** (`python/spandan/triage/`). What a flag becomes, as an explicit
+   graph: nodes are plain functions over typed state, edges are routing
+   functions declared with every name they may return, and `compile_graph()`
+   checks on import that every node is reachable, every path terminates, and
+   **no path exists from the language-model node to an action** — the LLM
+   annotates a decision that `mode` has already made and audited. Every
+   transition appends one JSON line before the next node runs; `act` refuses
+   to execute unless its decision is already on the trail. The kill-switch
+   turns inline decline into alert-only for one (merchant, BIN) when the
+   trailing hour shows the retry structure of an issuer outage rather than a
+   probe run — the signal §2.2 shows is invisible at five minutes. Its
+   parameters were registered from the training window before the effect on
+   test was known. `spandan triage-graph --mermaid` renders the diagram from
+   the edge table, so the picture cannot drift from the code.
+
+5. **Evaluation** (`python/spandan/eval/`). Temporal splits enforced by a
    loader that refuses anything else; threshold selection on validation only,
    maximizing net rupees subject to the alerts/day budget registered in
    `costs.toml` before the test window was read; alert dedup; three
@@ -99,7 +128,7 @@ every claim on an edge is enforced by a test named in the text that follows.
    ₹613/alert), not an input; a three-seed matrix and a budget frontier as a
    sensitivity analysis, not a menu.
 
-5. **Explanation** (`python/spandan/llm/`). One bounded task — frozen `Flag`
+6. **Explanation** (`python/spandan/llm/`). One bounded task — frozen `Flag`
    fields in, string out — kept outside the evaluation import graph, with
    tests that prove no evaluation number can pass through a language model.
    The recorded model output fabricated evidence (FAILURE_MODES §8), so the
