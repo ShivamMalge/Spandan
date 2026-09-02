@@ -154,7 +154,7 @@ def test_eval_runs_with_llm_import_poisoned(tmp_path):
         for name in saved:
             del sys.modules[name]
         sys.modules["spandan.llm"] = poison  # type: ignore[assignment]
-        for sub in ("provider", "explain"):
+        for sub in ("provider", "explain", "grounding"):
             sys.modules[f"spandan.llm.{sub}"] = poison  # type: ignore[assignment]
 
         poisoned_validation, poisoned_test, poisoned_threshold = run_full_eval()
@@ -264,3 +264,107 @@ def test_explain_returns_a_string_and_nothing_else():
 
     result = complete(cassette["prompt"], model=cassette["model"])
     assert isinstance(result, str)
+
+
+# --- the validator: the boundary for the prose ---------------------------------
+
+
+def test_validator_rejects_the_recorded_fabrications():
+    """The two cassettes recorded on 2026-08-26 ARE the fabrication finding.
+
+    One conditions a block on a CVV/AVS result; the other on per-card history
+    and a cardholder IP. None of those exist in this pipeline. If the validator
+    accepts either, it does not catch the failure it was built for.
+    """
+    from spandan.llm.grounding import validate_cassette
+
+    verdicts = {
+        path.stem: validate_cassette(path)[2]
+        for path in sorted(CASSETTE_DIR.glob("*.json"))
+    }
+    assert verdicts, "no cassettes committed"
+
+    probe = verdicts["9738bd8f63262ce48ca28a3daaebbd1c"]      # the Rs 5.45 probe
+    sale = verdicts["7e36f73e42cab59ec4f903a29c7b22d5"]       # the Rs 150 flash-sale FP
+    assert not probe.ok, "the CVV/AVS note was accepted"
+    assert any("CVV" in r or "AVS" in r for r in probe.reasons), probe.reasons
+    assert not sale.ok, "the per-card-history note was accepted"
+    assert any("history" in r or "IP" in r for r in sale.reasons), sale.reasons
+
+
+def test_validator_accepts_the_template():
+    """The deterministic template can only substitute fields that exist, so it
+    must pass by construction - if it does not, the validator is too strict to
+    ship in front of it."""
+    from spandan.llm import render_prompt, render_template, validate
+
+    flag = _sample_flag()
+    verdict = validate(render_template(flag), render_prompt(flag))
+    assert verdict.ok, verdict.reasons
+
+    # And the one in the CLI's fallback path, with a saturated window and a
+    # non-trivial amount, so the numeric checks see rounding.
+    flag2 = _sample_flag(window_amount_mean_paise=15_000.0, baseline_amount_mean_paise=265_800.0,
+                         window_decline_ratio=0.83, baseline_decline_ratio=0.087,
+                         window_events=70, window_declines=58, window_saturated=True)
+    verdict2 = validate(render_template(flag2), render_prompt(flag2))
+    assert verdict2.ok, verdict2.reasons
+
+
+def test_validator_catches_invented_evidence_numbers():
+    """A note that quotes a rupee amount or a percentage the prompt never
+    contained has invented evidence, whatever else it says."""
+    from spandan.llm import render_prompt, validate
+
+    prompt = render_prompt(_sample_flag())
+    assert validate("Rs 5.45 declined, 100% of the window.", prompt).ok
+    assert not validate("Rs 5.45 declined; the card's usual ticket is Rs 12,000.", prompt).ok
+    assert not validate("Decline rate here is 63% against a 10% baseline.", prompt).ok
+    # Rounding is not fabrication.
+    assert validate("About Rs 5 against a Rs 2,833 ticket; 9.9% baseline declines.", prompt).ok
+
+
+def test_validator_cannot_see_labels_or_state():
+    """Two strings in, a verdict out. It has no access to the Flag, the stream,
+    the labels, or the network - asserted on the signature and the import graph."""
+    import inspect
+
+    grounding = importlib.import_module("spandan.llm.grounding")
+
+    params = list(inspect.signature(grounding.validate).parameters)
+    assert params == ["note", "prompt"]
+
+    for name in list(sys.modules):
+        if name.startswith(("spandan.gen", "spandan.eval", "spandan.detect")):
+            del sys.modules[name]
+    importlib.reload(grounding)
+    assert not [m for m in sys.modules if m.startswith(("spandan.gen", "spandan.eval"))], (
+        "the validator pulled in the generator or the evaluation"
+    )
+
+
+def test_explain_flag_never_returns_a_rejected_note(monkeypatch):
+    """Validation is inside explain_flag, so no caller can bypass it."""
+    from spandan.llm import ExplanationRejected, explain_flag, provider
+
+    fabricated = ("**Rs 5.45 | BIN 099813 | probe**\n\nBlock the BIN if the CVV/AVS "
+                  "result on this attempt returned Mismatched.")
+    monkeypatch.setattr(provider, "complete", lambda prompt, model=None: fabricated)
+
+    with pytest.raises(ExplanationRejected) as excinfo:
+        explain_flag(_sample_flag())
+    assert excinfo.value.note == fabricated
+    assert not excinfo.value.verdict.ok
+
+
+def test_grounded_prompt_is_the_same_evidence_plus_the_rule():
+    """The grounded variant must not smuggle in new evidence - it may only add
+    the enumeration of what does not exist."""
+    from spandan.llm import render_prompt
+
+    flag = _sample_flag()
+    plain, grounded = render_prompt(flag), render_prompt(flag, grounded=True)
+    assert grounded.startswith(plain)
+    assert "GROUNDING RULE" in grounded
+    for banned in ("label", "scenario_id", "slow_low", "flash_sale"):
+        assert banned not in grounded

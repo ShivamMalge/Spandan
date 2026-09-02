@@ -230,14 +230,16 @@ rejects any explanation referencing evidence outside the `Flag`. Build it.
 
 **In scope.**
 
-1. **`llm/validate.py` — schema-grounded validation.** Given a note and the
-   `Flag` it was generated from, reject it if it references a field or concept
-   the `Flag` does not carry: a curated deny-list for the fields that do not
-   exist in this pipeline (CVV, AVS, 3DS, reason code, cardholder IP, per-card
-   history, geography, MCC) plus a check that every number in the note appears
-   in the rendered prompt. Rejection falls back to the template — the same
-   degradation `explain` already has for a cassette miss — with a distinct exit
-   code and a one-line reason.
+1. **`llm/grounding.py` — schema-grounded validation.** Given a note and the
+   rendered prompt it was generated from (exactly what the model saw), reject
+   it if it references a field or concept the pipeline does not carry: a
+   curated deny-list for the fields that do not exist (CVV, AVS, 3DS, reason
+   code, cardholder IP, per-card history, geography, MCC) plus a check that
+   every rupee amount and percentage in the note appears in the prompt.
+   Validation lives inside `explain_flag`, so no caller can obtain an
+   unvalidated note. Rejection falls back to the template — the same
+   degradation `explain` already has for a cassette miss — with exit code 4
+   and a one-line reason; the rejected note goes to stderr for the record.
 
 2. **Measure it, do not assert it.** Run the validator over both committed
    cassettes: it must reject both (they are the fabrication finding). Then
@@ -265,6 +267,7 @@ loops, a second provider.
 env -u GEMINI_API_KEY pytest tests/test_llm.py -v        # all pass, sockets blocked
 pytest tests/test_llm.py::test_eval_runs_with_llm_import_poisoned   # STILL GREEN
 python -m spandan.cli explain --flag-id txn_000804993    # exit 4 (validator rejection), template shown
+python -m spandan.cli validate-cassettes                 # one verdict per cassette, with reasons
 ls python/spandan/llm/cassettes/ | wc -l                 # 4
 ```
 

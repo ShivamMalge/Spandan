@@ -195,9 +195,11 @@ def explain(argv: list[str] | None = None) -> int:
     parser.add_argument("--threshold", type=float, default=None)
     parser.add_argument("--template", action="store_true",
                         help="render the deterministic template instead of the LLM cassette")
+    parser.add_argument("--grounded-prompt", action="store_true",
+                        help="use the prompt that enumerates what this pipeline does not have")
     args = parser.parse_args(argv)
 
-    from .llm import CassetteMiss, explain_flag, render_template
+    from .llm import CassetteMiss, ExplanationRejected, explain_flag, render_template
 
     data_dir = Path(args.data)
     threshold = args.threshold
@@ -233,7 +235,7 @@ def explain(argv: list[str] | None = None) -> int:
         print(render_template(flag))
         return 0
     try:
-        print(explain_flag(flag))
+        print(explain_flag(flag, grounded=args.grounded_prompt))
     except CassetteMiss as miss:
         print(f"[no cassette] {miss}", file=sys.stderr)
         print()
@@ -241,19 +243,53 @@ def explain(argv: list[str] | None = None) -> int:
         print()
         print(render_template(flag))
         return 3
+    except ExplanationRejected as rejected:
+        # The note is logged, not shown as the explanation: an analyst must not
+        # receive a next action conditioned on data the system does not have.
+        print(f"[rejected] model note cited evidence it was never shown: {rejected}", file=sys.stderr)
+        print(f"[rejected] note, for the record:\n{rejected.note}", file=sys.stderr)
+        print()
+        print("explanation rejected by the validator; deterministic template instead:")
+        print()
+        print(render_template(flag))
+        return 4
     return 0
+
+
+def validate_cassettes(argv: list[str] | None = None) -> int:
+    """`spandan validate-cassettes` - one grounding verdict per committed cassette.
+
+    The measurement behind FAILURE_MODES §8: how many recorded explanations
+    cite evidence the model was never shown. Exit 0 whatever the count; the
+    number is the result, not a failure.
+    """
+    _utf8()
+    parser = argparse.ArgumentParser(prog="spandan validate-cassettes")
+    parser.add_argument("--cassettes", default=None, help="directory (default: the committed set)")
+    args = parser.parse_args(argv)
+
+    from .llm.grounding import cassette_report
+    from .llm.provider import CASSETTE_DIR
+
+    text, _rejected, total = cassette_report(Path(args.cassettes) if args.cassettes else CASSETTE_DIR)
+    print(text)
+    return 0 if total else 1
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="spandan", add_help=True)
     parser.add_argument(
-        "command", choices=("replay", "explain"), help="replay the stream, or explain one flag"
+        "command",
+        choices=("replay", "explain", "validate-cassettes"),
+        help="replay the stream, explain one flag, or validate the committed cassettes",
     )
     args, rest = parser.parse_known_args(argv)
     if args.command == "replay":
         return replay(rest)
     if args.command == "explain":
         return explain(rest)
+    if args.command == "validate-cassettes":
+        return validate_cassettes(rest)
     return 2
 
 

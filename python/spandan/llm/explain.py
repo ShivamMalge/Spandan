@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from ..detect.interface import Flag
 from . import provider
+from .grounding import Verdict, validate
 
 #: The system-style preamble. Everything the model needs to know about the
 #: domain is in the prompt; it is not asked to decide anything, only to say
@@ -55,10 +56,40 @@ Evidence:
 - score {score:.2f} against threshold {threshold:.2f} (context only - do not cite)
 """
 
+#: The grounded variant, recorded after the fabrication finding. Identical
+#: evidence; adds an explicit enumeration of what this pipeline does NOT have.
+#: Whether telling the model changes anything is a measured question, not an
+#: assumption - see `docs/FAILURE_MODES.md` §8 for the answer.
+_PROMPT_GROUNDED = _PROMPT + """
+GROUNDING RULE. The evidence above is the COMPLETE record. This system has no
+CVV or AVS result, no 3-D Secure outcome, no decline reason code, no IP
+address, no device identifier, no card-level or cardholder history, no
+geography, no merchant category. Do not mention, assume, or condition any
+action on anything not listed above. If the right next action would need data
+that is not listed, say the data is unavailable here and give the best action
+possible with what is listed. Quote amounts and percentages only as they
+appear above.
+"""
 
-def render_prompt(flag: Flag) -> str:
+
+class ExplanationRejected(RuntimeError):
+    """The model's note cited evidence it was never shown.
+
+    Carries the rejected note and the verdict so a caller can log what was
+    said, but the note is not returned as an explanation - an analyst must not
+    receive a next action conditioned on data the system does not have.
+    """
+
+    def __init__(self, note: str, verdict: Verdict) -> None:
+        super().__init__(str(verdict))
+        self.note = note
+        self.verdict = verdict
+
+
+def render_prompt(flag: Flag, grounded: bool = False) -> str:
     """Prompt text from frozen Flag fields and nothing else."""
-    return _PROMPT.format(
+    template = _PROMPT_GROUNDED if grounded else _PROMPT
+    return template.format(
         merchant_id=flag.merchant_id,
         bin=flag.bin,
         window_events=flag.window_events,
@@ -78,9 +109,20 @@ def render_prompt(flag: Flag) -> str:
     )
 
 
-def explain_flag(flag: Flag) -> str:
-    """The bounded task. String in the analyst's hands, nothing else changed."""
-    return provider.complete(render_prompt(flag))
+def explain_flag(flag: Flag, grounded: bool = False) -> str:
+    """The bounded task. String in the analyst's hands, nothing else changed.
+
+    The note is validated against the prompt it was generated from before it
+    is returned: a note that cites evidence outside the prompt raises
+    `ExplanationRejected` rather than reaching the analyst. Validation lives
+    here, not in the CLI, so no caller can obtain an unvalidated note.
+    """
+    prompt = render_prompt(flag, grounded=grounded)
+    note = provider.complete(prompt)
+    verdict = validate(note, prompt)
+    if not verdict.ok:
+        raise ExplanationRejected(note, verdict)
+    return note
 
 
 def render_template(flag: Flag) -> str:

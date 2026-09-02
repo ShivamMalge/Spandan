@@ -7,7 +7,17 @@ test walks their imports, and the poisoned-import test proves the evaluation's
 numbers survive this package being unimportable.
 """
 
-from .explain import explain_flag, render_prompt, render_template
+from .explain import ExplanationRejected, explain_flag, render_prompt, render_template
 from .provider import CassetteMiss, complete
+from .grounding import Verdict, validate
 
-__all__ = ["CassetteMiss", "complete", "explain_flag", "render_prompt", "render_template"]
+__all__ = [
+    "CassetteMiss",
+    "ExplanationRejected",
+    "Verdict",
+    "complete",
+    "explain_flag",
+    "render_prompt",
+    "render_template",
+    "validate",
+]

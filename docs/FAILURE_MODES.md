@@ -683,9 +683,41 @@ note, is caught by reading the note against the schema, and corrupts nothing.
 
 **Disposition.** The cassettes stay as recorded; re-prompting for a nicer
 sample after seeing the bad one is the same selection error this project
-refuses on thresholds. `render_template` — which can only substitute fields
-that exist and therefore cannot fabricate — is the shipped explanation. The
-unbuilt fix, recorded in the §7 style of diagnosed-not-attempted: a
-post-hoc validator that checks every factual clause in a model note against
-the `Flag`'s actual fields and rejects notes referencing evidence outside
-them. Not built because the template already has that property for free.
+refuses on thresholds.
+
+**The fix, built and measured (Phase D, 2026-09-03).** `llm/grounding.py`
+validates a note against the rendered prompt — exactly what the model was
+shown — on the simplest rule that catches what was recorded: *a note may cite
+nothing the model was not shown.* Two checks: a deny-list of evidence this
+pipeline does not carry (CVV/AVS, 3-D Secure, reason codes, IP address,
+device identity, per-card history, geography, MCC, dispute history), and
+every rupee amount and percentage in the note must appear in the prompt
+within rounding. Validation lives inside `explain_flag`, so no caller can
+obtain an unvalidated note; a rejection falls back to the template with exit
+code 4 and the rejected note logged to stderr for the record.
+
+Run over the committed cassettes (`spandan validate-cassettes`):
+
+| cassette | model | verdict | reasons |
+|---|---|---|---|
+| `9738bd8f…` (₹5.45 probe) | gemini-3.1-flash-lite | **REJECTED** | cites CVV/CVC result; cites AVS result |
+| `7e36f73e…` (₹150 sale FP) | gemini-3.1-flash-lite | **REJECTED** | cites decline reason code; cites per-card history; cites IP address |
+
+**2 of 2 rejected**, each on the exact fabrication the reading found. The
+deterministic template passes the same validator by construction
+(`test_validator_accepts_the_template`), which is the property that makes it
+the fallback.
+
+What ships is therefore: the model's note **if** it cites nothing outside its
+prompt, the template otherwise. On the two recorded notes that means the
+template both times. What the validator cannot do, stated so nobody over-reads
+it: it cannot tell a wrong inference from a right one — a note that reasons
+badly from real evidence passes. It catches the failure class that was
+actually observed, invented evidence, and nothing more.
+
+A second prompt variant (`render_prompt(flag, grounded=True)`) adds an explicit
+enumeration of what this pipeline does not have. Whether telling the model
+changes its behaviour is a measured question: two more cassettes are to be
+recorded with it and run through the same validator, and the result — whatever
+it is — goes in this table. Until they exist, the claim is only that the
+validator catches what was recorded, not that the grounded prompt prevents it.

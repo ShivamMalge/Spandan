@@ -107,6 +107,17 @@ a measured negative result with the blast radius bounded by architecture —
 see FAILURE_MODES §8 for why a hallucinating explainer here degrades prose
 but cannot corrupt a number.
 
+**Addendum, 2026-09-03: the boundary now applies to the prose too.**
+`llm/grounding.py` rejects any note that cites evidence outside the prompt it
+was generated from; `explain_flag` validates before returning, so an analyst
+never receives a note conditioned on data the system does not have. Both
+recorded notes above are rejected by it — the ₹5.45 note on CVV/AVS, the ₹150
+note on reason code, per-card history and IP — and the template passes by
+construction. That does not change this verdict: the model output was worse
+than the target, and now it is also caught. What it changes is the disposition
+from "template, because the model cannot be trusted" to "model note when it is
+grounded, template when it is not" — with the count so far at 0 of 2 grounded.
+
 ## Superseded: the pre-recording comparison, against in-context notes
 
 > **Superseded 2026-08-26 by the verdict above.** The notes this section
