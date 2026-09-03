@@ -44,7 +44,10 @@ jobs:
       - name: lint
         run: |
           . .venv/bin/activate
-          python -m pip install -q ruff
+          # Pinned to the version the tree was linted against. ruff 0.16 turned on
+          # rules 0.15 did not, and a linter that moves under a frozen detector
+          # would fail on files the freeze forbids touching.
+          python -m pip install -q ruff==0.15.21
           ruff check python/ tests/ scripts/
 
       - name: clippy
