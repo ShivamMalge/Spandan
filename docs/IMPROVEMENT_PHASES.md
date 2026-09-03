@@ -248,6 +248,28 @@ pytest tests/test_baselines.py -v
 python scripts/check_figures.py                          # PASS after the doc update
 ```
 
+**Landed (Sep 3).** `spandan.eval.features` reads the six terms off
+`ReferenceDetector._advance` and records the detector score, asserted identical
+to the harness pass on all 805,066 test events; `spandan.eval.baselines` fits
+logistic regression on the six terms and a gradient-boosted model on nine, on
+the warm-up window, thresholds on validation under the same budget, three seeds,
+through `evaluate_scored` — the harness tail split out so there is one copy of
+the pipeline (`make eval` byte-identical before and after). `make baselines`
+writes `data/baselines.json`; `make check` verifies every quoted figure from it;
+the CI figures job runs it. Six tests, including the poisoned test split, the
+label-blind extraction, and the hand row reproducing `evaluate` field for field.
+scikit-learn is a dev extra; `spandan.detect` is asserted not to import it.
+
+**Measured.** Precision at the 0.15% base rate does not move across seeds
+(logreg6 median 0.0845 vs hand 0.0824, ranges overlapping; gbm9 0.0699). Recall
+does: 0.9228 vs 0.8444 median at the same alert budget, the linear model's worst
+seed above the hand weights' best; net roughly doubles. Neither learned model
+fixes the single-merchant outage (45.1% and 69.6% flagged vs 50.5%). The linear
+model's weights are a real criticism of the hand weights (BIN velocity and
+decline excess ×0.12, per-IP velocity sign-flipped, repetition damping ×5).
+Reported in FAILURE_MODES §9 and a README table; nothing shipped, detector
+untouched.
+
 **Effort.** 4h. **Risk: low-medium** — the risk is spending time on the GBM;
 if it runs over, ship the logistic regression alone, which is the comparison
 that matters. Gains: axis 3 → 9.5, axis 7 → 5.5, axis 9 → 8.5.

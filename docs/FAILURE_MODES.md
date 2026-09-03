@@ -801,3 +801,107 @@ changes its behaviour is a measured question: two more cassettes are to be
 recorded with it and run through the same validator, and the result — whatever
 it is — goes in this table. Until they exist, the claim is only that the
 validator catches what was recorded, not that the grounded prompt prevents it.
+
+## 9. Learned weights versus hand weights
+
+The design claim is that six hand-weighted terms, summed, are enough. The
+fair test is a model that learns its own weights over the same terms, reported
+through the same pipeline, and that is what `make baselines` does.
+
+**Method.** `spandan.eval.features` pushes every event through
+`ReferenceDetector._advance`, the per-event step the detector itself uses, and
+reads the six term values out of the evidence dict it already builds; the
+detector score it records is asserted identical to the harness pass, bit for
+bit, on all 805,066 test events. Three event columns are added for the richer
+model: log-amount, declined, hour of day. Two models fit on the warm-up window,
+the first 75% of the training days (599,309 events), which is the only
+labelled data that is neither the validation window nor the test window. Each
+threshold is chosen on validation under the same alerts/day ≤ 10 budget as the
+detector, and each model is read once on test. Three seeds, as in §0. Nothing
+here is shipped: the detector is frozen, `spandan.detect` imports neither this
+module nor scikit-learn, and a test asserts both.
+
+**On the stream every other figure comes from** (seed 20260824; learned
+thresholds are log-odds):
+
+| model | features | threshold | precision | alert precision | precision @ 0.15% | recall | PR-AUC | net ₹ | alerts/day (test) | legitimate declined |
+|---|---|---|---|---|---|---|---|---|---|---|
+| hand | six terms, hand weights | 21.99 | 0.4462 | 0.433 | **0.0824** | 0.8444 | 0.6615 | 279,151 | 9.7 | 1 in 71 |
+| logreg6 | the same six terms, learned weights | -1.498 | 0.5333 | 0.413 | **0.1130** | 0.9113 | 0.8541 | 619,275 | 10.0 | 1 in 93 |
+| gbm9 | six terms + log-amount, declined, hour | -5.528 | 0.4427 | 0.316 | **0.0814** | 0.9651 | 0.6810 | 715,730 | 11.0 | 1 in 61 |
+
+Negative controls, events flagged (false positives by construction):
+
+| model | flash_sale | issuer_outage | outage_single_merchant |
+|---|---|---|---|
+| hand | 20/17,787 (0.1%) | 1,818/18,057 (10.1%) | 9,170/18,169 (50.5%) |
+| logreg6 | 0/17,787 (0.0%) | 72/18,057 (0.4%) | 8,199/18,169 (45.1%) |
+| gbm9 | 0/17,787 (0.0%) | 16/18,057 (0.1%) | 12,644/18,169 (69.6%) |
+
+Attack scenarios, share of events flagged:
+
+| model | burst | rotating | slow_low |
+|---|---|---|---|
+| hand | 0.9619 | 0.8252 | 0.4446 |
+| logreg6 | 0.9640 | 0.9079 | 0.7105 |
+| gbm9 | 0.9830 | 0.9416 | 0.9913 |
+
+What the linear model learned, as a multiplier on the hand weight already
+inside each term (1.0 would mean the hand weight was right):
+
+| term | hand weight | learned multiplier |
+|---|---|---|
+| velocity_bin | 1.0 | +0.122 |
+| decline_bin | 2.0 | +0.126 |
+| amount | 1.0 | +1.618 |
+| velocity_ip | 0.5 | -4.538 |
+| repetition (damping) | -1.2 | +5.053 |
+| merchant_span (damping) | -1.4 | -0.093 |
+
+**Across three independently generated streams** (median, min–max):
+
+| model | precision @ 0.15% | recall | net ₹ |
+|---|---|---|---|
+| hand | 0.0824 (0.0672–0.1185) | 0.8444 (0.8189–0.9106) | 348,845 (279,151–395,007) |
+| logreg6 | 0.0845 (0.0728–0.1130) | 0.9228 (0.9113–0.9570) | 632,567 (619,275–671,464) |
+| gbm9 | 0.0699 (0.0506–0.0814) | 0.9651 (0.9418–0.9998) | 705,752 (688,571–715,730) |
+
+**Reading it.**
+
+1. **Precision at the realistic base rate does not move.** The linear model
+   sits at a median 0.0845 against the hand weights at 0.0824, each inside the
+   other's range; the boosted model is lower at 0.0699. The 0.1130 on the base
+   stream is one seed. Whatever is limiting precision at a 0.15% base rate, it
+   is not the choice of weights over these terms.
+2. **Recall does move, at the same alert budget.** The linear model's worst
+   seed (0.9113) is above the hand weights' best (0.9106); the median gain is
+   eight points, and it lands where the detector is weakest: slow_low 0.44 →
+   0.71, rotating 0.83 → 0.91. The modelled net roughly doubles, which is
+   mostly that recall priced through the rupee model, with the §6 caveat that
+   the model under-prices false positives still standing.
+3. **Neither learned model fixes the measured failure.** The single-merchant
+   outage goes from 50.5% flagged to 45.1% under the linear model, which
+   up-weights the repetition damping five-fold and still cannot separate it,
+   and to 69.6% under the boosted model, which buys its recall partly by
+   flagging the outage harder. The issuer-wide outage, by contrast, nearly
+   vanishes (1,818 → 72 → 16 events). The single-merchant outage is separable
+   from an attack only by a signal these nine features do not carry, which is
+   what §2.1a's kill-switch supplies from the trailing hour rather than the
+   five-minute window.
+4. **What the learned weights say about the hand weights.** By the linear
+   model's account the two headline terms, BIN velocity and BIN decline
+   excess, are weighted about eight times too high (×0.12 each); the amount
+   term is under-weighted (×1.6); repetition damping is under-weighted
+   five-fold; merchant-span damping does almost nothing (×−0.09); and the
+   per-IP velocity term has the wrong sign (×−4.5): in this traffic, holding
+   the other terms fixed, high per-IP velocity argues against card testing.
+   That is a real criticism of the hand weights. It comes with the caveat that
+   the model was fitted in-distribution, on the warm-up window of the same
+   generator, which the hand weights were written before ever seeing.
+
+**What it means for the freeze.** The linear model is the change that would
+ship next if recall at the same alert budget is what the merchant wants, and
+this section is the evidence that decision would be made on. It is not shipped;
+the detector stays frozen and every headline figure is still the hand-weighted
+one. The next detector-level change that would move the number this project
+leads with is not a re-weighting. It is a feature.

@@ -9,7 +9,7 @@ name: ci
 # Two jobs, in parallel:
 #   test     - everything that guards a claim: parity, the generator's
 #              properties, the LLM boundary, the triage topology, clippy.
-#   figures  - `make data`, `make eval`, `make check`: regenerates the stream
+#   figures  - `make data`, `make eval`, `make baselines`, `make check`: regenerates the stream
 #              and the evaluation from nothing on Linux and fails if any figure
 #              a document asserts no longer reproduces. This is the README's
 #              "reproduces from make eval on a fresh clone" as a machine check
@@ -106,6 +106,13 @@ jobs:
         run: |
           . .venv/bin/activate
           make eval
+
+      - name: make baselines
+        env:
+          PYTHONIOENCODING: utf-8
+        run: |
+          . .venv/bin/activate
+          make baselines
 
       - name: make check
         env:

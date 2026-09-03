@@ -224,6 +224,27 @@ def evaluate(
     alerts_per_day_budget: float | None = None,
 ) -> dict:
     validation_scores, test_scores = score_split_once(split, config)
+    return evaluate_scored(
+        split, validation_scores, test_scores, model, episode_windows, alerts_per_day_budget
+    )
+
+
+def evaluate_scored(
+    split: Split,
+    validation_scores: np.ndarray,
+    test_scores: np.ndarray,
+    model: CostModel,
+    episode_windows: list[dict],
+    alerts_per_day_budget: float | None = None,
+) -> dict:
+    """The report tail, from scores already computed.
+
+    Split out of `evaluate` so the Phase C learned baselines go through the
+    same threshold selection, cost model and reweighting as the detector, with
+    no second copy of any of it. `evaluate` is this function fed by
+    `score_split_once`; `test_hand_row_reproduces_the_harness` asserts the
+    detector scored through here matches `evaluate` field for field.
+    """
     sweep = sweep_thresholds(split.validation, validation_scores, model)
     budget = model.alerts_per_day_budget if alerts_per_day_budget is None else alerts_per_day_budget
     chosen = select_threshold(sweep, budget)

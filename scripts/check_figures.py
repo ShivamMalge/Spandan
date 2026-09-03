@@ -12,12 +12,16 @@ Sources of truth, in order of authority:
                         must match it (consistency, not reproduction)
   spandan.triage.graph.render_mermaid() - the README's triage diagram must be
                         exactly what the declaration renders
+  data/baselines.json - written by `make baselines`; the learned-baseline rows
+                        in README and FAILURE_MODES section 9
 
 Four passes:
   1. POSITIVE  every asserted figure must equal the corresponding value
   2. DERIVED   ratios and roundings quoted in prose must follow from the data
   3. DIAGRAM   the fenced triage mermaid block equals render_mermaid()
   4. NEGATIVE  superseded figures may not survive outside history sections
+  5. BASELINES every learned-baseline figure, and the hand row must equal the
+               harness's own seed matrix
 
 What it cannot check, stated so nobody over-reads a PASS: time-to-detection
 and the budget frontier are not in metrics.json, so "60/60 episodes" and the
@@ -158,7 +162,64 @@ def main() -> int:
             if fig in body:
                 fails.append(f"{path.relative_to(ROOT)}: superseded figure {fig!r} survives")
 
-    print(f"checked {len(checks) + 4 + 6 + len(derived)} figures across {len(docs)} documents "
+    # ------------------------------------------------------------ 5. BASELINES
+    baselines_path = ROOT / "data" / "baselines.json"
+    n_baselines = 0
+    if not baselines_path.exists():
+        fails.append("data/baselines.json is missing; run `make baselines`")
+    else:
+        bl = json.loads(baselines_path.read_text(encoding="utf-8"))
+        sm = bl["seed_matrix"]
+
+        def spread(name: str, key: str) -> tuple[float, float, float]:
+            vals = [r[key] for r in sm if r["model"] == name]
+            return statistics.median(vals), min(vals), max(vals)
+
+        for name in ("hand", "logreg6", "gbm9"):
+            row = bl["models"][name]
+            for label, token, where, text in [
+                (f"{name} p@base",    f"{row['precision_at_target_prevalence']:.4f}", "FAILURE_MODES", fm),
+                (f"{name} precision", f"{row['precision']:.4f}", "FAILURE_MODES", fm),
+                (f"{name} recall",    f"{row['recall']:.4f}", "FAILURE_MODES", fm),
+                (f"{name} net",       f"{row['net_rupees']:,.0f}", "FAILURE_MODES", fm),
+                (f"{name} 1 in N",    f"1 in {round(1 / row['legit_decline_rate'])}", "FAILURE_MODES", fm),
+            ]:
+                expect(label, text, token, where)
+                n_baselines += 1
+            for scenario in ("issuer_outage", "outage_single_merchant"):
+                v = row["per_scenario"][scenario]
+                expect(f"{name} {scenario}", fm, f"{v['flagged']:,}/{v['events']:,} ({v['rate']:.1%})", "FAILURE_MODES")
+                n_baselines += 1
+            for key, label in (("precision_at_target_prevalence", "p@base"), ("recall", "recall"), ("net_rupees", "net")):
+                med, lo, hi = spread(name, key)
+                fmt = (lambda v: f"{v:,.0f}") if key == "net_rupees" else (lambda v: f"{v:.4f}")
+                for text, where in ((fm, "FAILURE_MODES"), (readme, "README")):
+                    expect(f"{name} median {label}", text, fmt(med), where)
+                    n_baselines += 1
+                expect(f"{name} min {label}", fm, fmt(lo), "FAILURE_MODES")
+                expect(f"{name} max {label}", fm, fmt(hi), "FAILURE_MODES")
+                n_baselines += 2
+        for term, w in bl["models"]["logreg6"]["weights"].items():
+            expect(f"logreg6 multiplier {term}", fm, f"{w:+.3f}", "FAILURE_MODES")
+            n_baselines += 1
+        # The control: the hand row's spread is the harness's own seed matrix.
+        hand_net = spread("hand", "net_rupees")
+        harness_net = [r["net_rupees"] for r in full]
+        if abs(hand_net[0] - statistics.median(harness_net)) > 0.5:
+            fails.append("BASELINES: the hand row's median net does not equal the harness seed matrix")
+        outage = bl["models"]["logreg6"]["per_scenario"]["outage_single_merchant"]
+        boosted = bl["models"]["gbm9"]["per_scenario"]["outage_single_merchant"]
+        for label, ok, token in [
+            ("45% outage under logreg6", round(outage["flagged"] / outage["events"] * 100) == 45, "45%"),
+            ("70% outage under gbm9",    round(boosted["flagged"] / boosted["events"] * 100) == 70, "70%"),
+        ]:
+            if not ok:
+                fails.append(f"DERIVED {label}: arithmetic does not hold")
+            elif token not in readme:
+                fails.append(f"README: expected derived phrase {token!r} ({label})")
+            n_baselines += 1
+
+    print(f"checked {len(checks) + 4 + 6 + len(derived) + n_baselines} figures across {len(docs)} documents "
           f"(engine in metrics.json: {metrics['engine']})")
     if fails:
         print("FAIL")

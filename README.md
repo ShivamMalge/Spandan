@@ -50,7 +50,7 @@ strictly defense-only. Where each clause is met, and what proves it:
 Four evaluation criteria are reported for this buildathon by secondary
 coverage — not on the official page, so treated as reported. Where each lives:
 **Problem taste** — the loss class and the rupee model, above. **Build quality**
-— 119 Python and 33 Rust tests, two engines bit-exact over 1.6M events,
+— 125 Python and 33 Rust tests, two engines bit-exact over 1.6M events,
 reproduction from a fresh clone. **AI judgment** — the language model is
 structurally unable to reach a number and its notes are validated; see *Where
 AI is*. **Failure recovery** — [BUILD_LOG.md](docs/BUILD_LOG.md): thirteen entries,
@@ -90,6 +90,20 @@ The false-positive cost is inside the net position: the model charges contributi
 margin on every legitimate transaction declined, plus per-alert review, and the net
 stays positive only while an alert review costs under ₹613.
 
+**Against learned baselines on the same features** (median of three seeds; same
+alert budget, same pipeline; [FAILURE_MODES.md](docs/FAILURE_MODES.md) §9):
+
+| model | precision @ 0.15% | recall | net ₹ |
+|---|---|---|---|
+| hand weights, the detector | 0.0824 | 0.8444 | 348,845 |
+| logistic regression, the same six terms | 0.0845 | 0.9228 | 632,567 |
+| gradient boosting, nine features | 0.0699 | 0.9651 | 705,752 |
+
+Learning the weights does not move precision at the realistic base rate. It buys
+recall at the same alert budget, and neither learned model fixes the single-merchant
+outage: the linear one still flags 45% of it and the boosted one 70%, against
+50.5%. The learned models are reported, not shipped; `make baselines` reproduces them.
+
 **Two results, and they are separate claims.** It detects every attack episode, and
 fast — 60/60, p90 of 32 events on burst episodes of 190–300. And at a realistic base
 rate it declines 1 in 71 legitimate customers, which is not deployable as an inline
@@ -122,7 +136,7 @@ make check                                          # every documented figure ag
 ```
 
 `make eval ENGINE=rust` runs the same evaluation through the Rust core and produces
-a byte-identical metrics JSON. `make test` runs 119 Python tests (~13 min, several
+a byte-identical metrics JSON. `make test` runs 125 Python tests (~13 min, several
 build streams and run full evaluations) and `cargo test` runs 33 Rust tests.
 `make bench` reproduces [docs/BENCH.md](docs/BENCH.md). `make all` chains data,
 test, eval, demo and check. CI runs the test suite in one job and `make data`,
@@ -519,10 +533,10 @@ one model in the system has been shown to invent evidence. Detail in
 spandan-core/src/     Rust core: ingest, state, velocity, baseline, score, pybridge
 python/spandan/gen/   Synthetic stream generator + ASSUMPTIONS.md
 python/spandan/detect/  Detector interface, Python reference (the spec), Rust adapter, parity fixture
-python/spandan/eval/  Temporal loader, metrics, rupee cost model, evaluation harness, benchmarks
+python/spandan/eval/  Temporal loader, metrics, rupee cost model, evaluation harness, learned baselines, benchmarks
 python/spandan/triage/  The post-detection graph: nodes, routing table, audit trail, kill-switch
 python/spandan/llm/   Bounded explanation layer, grounding validator, cassettes, comparison target
-tests/                119 tests: generator, detector, cross-engine parity, evaluation, triage graph, LLM boundary
+tests/                125 tests: generator, detector, cross-engine parity, evaluation, triage graph, LLM boundary
 docs/                 ARCHITECTURE, FAILURE_MODES, BENCH, BUILD_LOG, PHASES, AUDIT, agents (house rules)
 scripts/              check_figures.py - every documented figure against the build (make check)
 ```
