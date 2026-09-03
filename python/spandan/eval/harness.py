@@ -17,7 +17,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ..detect import DetectorConfig, ReferenceDetector
+from ..detect import DetectorConfig
 from ..detect.rust_engine import ENGINES, make_detector
 from ..gen.build import MANIFEST_FILENAME
 from ..gen.schema import ATTACK_SCENARIOS, NEGATIVE_CONTROLS, Event
@@ -690,95 +690,6 @@ def render_ablations(rows: list[dict]) -> None:
             f"{row['name']:<22}{row['precision']:>11.4f}{row['recall']:>9.4f}"
             f"{row['pr_auc']:>9.4f}{rupees(row['net_paise']):>14}{row['alerts']:>8}"
         )
-
-
-def render_multiseed(rows: list[dict]) -> None:
-    print()
-    print("=" * 78)
-    print("MULTI-SEED STABILITY")
-    print("=" * 78)
-    if len(rows) < 2:
-        print("single seed only (pass SEEDS=3 for the spread)")
-        return
-    print("if the spread is wide, the headline numbers are noise and should not be")
-    print("reported as if they were stable.")
-    print(f"{'metric':<20}{'min':>12}{'median':>12}{'max':>12}{'spread':>12}")
-    for key, label, fmt in (
-        ("precision", "precision", "{:.4f}"),
-        ("recall", "recall", "{:.4f}"),
-        ("pr_auc", "PR-AUC", "{:.4f}"),
-        ("net_rupees", "net rupees", "{:,.0f}"),
-        ("alerts_per_day", "alerts/day", "{:.1f}"),
-    ):
-        values = [row[key] for row in rows]
-        lo, mid, hi = min(values), float(np.median(values)), max(values)
-        print(
-            f"{label:<20}{fmt.format(lo):>12}{fmt.format(mid):>12}{fmt.format(hi):>12}"
-            f"{fmt.format(hi - lo):>12}"
-        )
-    print()
-    print("per seed - this is the diagnostic that says WHERE the instability is:")
-    print(f"{'seed':>10}{'threshold':>11}{'PR-AUC':>9}{'precision':>11}{'recall':>9}")
-    for row in rows:
-        print(
-            f"{row['seed']:>10}{row['threshold']:>11.2f}{row['pr_auc']:>9.4f}"
-            f"{row['precision']:>11.4f}{row['recall']:>9.4f}"
-        )
-    print()
-    pr_spread = max(r["pr_auc"] for r in rows) - min(r["pr_auc"] for r in rows)
-    th_values = [r["threshold"] for r in rows]
-    print(
-        "PR-AUC is threshold-free, so its spread "
-        f"({pr_spread:.4f}) is the detector and the data, not the operating point."
-    )
-    print(
-        f"selected thresholds ranged {min(th_values):.2f} to {max(th_values):.2f}, so "
-        "threshold selection adds instability on top of that."
-    )
-
-
-def render_verdict(result: dict, seed_rows: list[dict], model: CostModel) -> None:
-    """The honest summary, after the spread is known.
-
-    Printed last and deliberately not optional. A single-seed headline of
-    "precision 1.00" is the kind of number this project exists not to publish.
-    """
-    print()
-    print("=" * 78)
-    print("VERDICT")
-    print("=" * 78)
-    confusion = result["confusion"]
-    if len(seed_rows) < 2:
-        print("single seed. Run with SEEDS=3 before believing any of the above.")
-        return
-
-    precisions = [r["precision"] for r in seed_rows]
-    recalls = [r["recall"] for r in seed_rows]
-    nets = [r["net_rupees"] for r in seed_rows]
-    spread_p = max(precisions) - min(precisions)
-    spread_r = max(recalls) - min(recalls)
-
-    print(f"headline seed reports precision {confusion.precision:.4f}, recall {confusion.recall:.4f}.")
-    print(
-        f"across {len(seed_rows)} streams that is precision "
-        f"{min(precisions):.2f}-{max(precisions):.2f} and recall "
-        f"{min(recalls):.2f}-{max(recalls):.2f}, "
-        f"net {R}{min(nets):,.0f}-{R}{max(nets):,.0f}."
-    )
-    print()
-    if spread_p > 0.15 or spread_r > 0.15:
-        print("*** THE HEADLINE NUMBERS ARE NOT STABLE. ***")
-        print("Reporting the single-seed figures as the result would be reporting noise.")
-        print("Report the median and the range, and read docs/FAILURE_MODES.md for why.")
-        print()
-        print("Two separate causes, and they need different fixes:")
-        print("  1. the test window holds 6 attack episodes (2 per scenario), so any")
-        print("     per-scenario recall rests on a sample of two. That is an")
-        print("     underpowered evaluation regardless of which way it errs.")
-        print("  2. threshold selection chases a bumpy net curve across streams.")
-    else:
-        print("spread is narrow enough that the headline figures can be reported as-is,")
-        print("with the range quoted alongside them.")
 
 
 def main(argv: list[str] | None = None) -> int:

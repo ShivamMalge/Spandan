@@ -161,6 +161,25 @@ gh run list --limit 1                                    # CI green on GitHub
 The `make eval` diff is the gate that matters: deleting dead code from the
 harness must not change one byte of output.
 
+**Landed (Sep 3).** The shadowed `render_multiseed`/`render_verdict` pair and
+three unused imports are gone from the harness; ruff reports 0 errors across
+`python/`, `tests/` and `scripts/`. `scripts/check_figures.py` is committed and
+wired as `make check` (31 figures across 13 documents, PASS) and into `make all`.
+`.github/workflows/ci.yml` runs two parallel jobs on ubuntu: `test` (setup, ruff,
+clippy, cargo test, pytest, graph render) and `figures` (`make data`, `make eval`,
+`make check`). That second job is a deviation from item 3 above, which had ruled
+`make eval` too slow for CI: in its own job it costs wall time only, and it turns
+the fresh-clone reproduction claim into a machine check on every push. `make bench`
+is guarded behind `MEMORY_SUPPORTED`, with a test that fakes the platform after
+numpy has loaded (numpy reads `sys.platform` at import). `agents.md` moved to
+`docs/`, `scripts/notimpl.py` removed, stray `.bak` files deleted.
+
+The gate held: `make eval` before and after the harness deletion diff identical
+with timing lines excluded, and `metrics.json` identical field for field. 119
+Python tests pass (the 118 plus the bench guard); clippy clean; the detector diff
+is empty. CI: the first run on the landing push is recorded in the line below
+once it completes, not before.
+
 **Effort.** 3h. **Risk: low** — the harness edit is a deletion, and the eval
 diff catches any accident. Gains: axis 5 → 9, axis 6 → 9.5, axis 10 → 8.
 

@@ -1,0 +1,104 @@
+name: ci
+
+# A runner with no global tooling is the machine the fresh-clone criterion
+# approximates by hand. Two defects in BUILD_LOG (entries nine and eleven)
+# were things only a clean environment could catch: a globally installed
+# pytest plugin masking an import-order bug, and a maturin that resolved
+# only because one happened to be on PATH. These jobs are that environment.
+#
+# Two jobs, in parallel:
+#   test     - everything that guards a claim: parity, the generator's
+#              properties, the LLM boundary, the triage topology, clippy.
+#   figures  - `make data`, `make eval`, `make check`: regenerates the stream
+#              and the evaluation from nothing on Linux and fails if any figure
+#              a document asserts no longer reproduces. This is the README's
+#              "reproduces from make eval on a fresh clone" as a machine check
+#              rather than a sentence.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: make setup
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          make setup
+
+      - name: lint
+        run: |
+          . .venv/bin/activate
+          python -m pip install -q ruff
+          ruff check python/ tests/ scripts/
+
+      - name: clippy
+        run: cargo clippy --manifest-path spandan-core/Cargo.toml --release -- -D warnings
+
+      - name: cargo test
+        run: cargo test --manifest-path spandan-core/Cargo.toml --release
+
+      - name: pytest
+        env:
+          PYTHONIOENCODING: utf-8
+        run: |
+          . .venv/bin/activate
+          pytest -q
+
+      - name: the graph compiles and renders from its declaration
+        run: |
+          . .venv/bin/activate
+          spandan triage-graph
+          spandan triage-graph --mermaid | grep -c "explain --> ground"
+
+  figures:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: make setup
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          make setup
+
+      - name: make data
+        run: |
+          . .venv/bin/activate
+          make data
+
+      - name: make eval
+        env:
+          PYTHONIOENCODING: utf-8
+        run: |
+          . .venv/bin/activate
+          make eval
+
+      - name: make check
+        env:
+          PYTHONIOENCODING: utf-8
+        run: |
+          . .venv/bin/activate
+          make check

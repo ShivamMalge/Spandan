@@ -25,7 +25,7 @@ from spandan.gen.build import (
     build,
     read_stream,
 )
-from spandan.gen.config import DEFAULT_CONFIG, GenConfig, ScenarioEpisodeSpec
+from spandan.gen.config import DEFAULT_CONFIG
 from spandan.gen.schema import (
     ALL_COLUMNS,
     ATTACK_SCENARIOS,

@@ -1,13 +1,11 @@
 # Spandan task interface.
 #
-# Every target is declared here in Phase 0 so the interface is reviewable up
-# front. Targets whose phase has not been handed over exit non-zero via
-# scripts/notimpl.py rather than silently succeeding.
+# Every target is declared here so the interface is reviewable up front.
 #
 # Recipes are deliberately one command per line with no shell operators, so they
 # behave identically under cmd.exe, PowerShell and bash.
 
-.PHONY: setup test data eval bench demo all
+.PHONY: setup test data eval bench demo check all
 
 PY := python
 SEEDS ?= 3
@@ -34,7 +32,12 @@ demo:
 bench:
 	$(PY) -m spandan.eval.bench --data data
 
+# Every figure the documents assert, checked against data/metrics.json and
+# data/manifest.json. Fails on the first figure that no longer reproduces.
+check:
+	$(PY) scripts/check_figures.py
+
 # Everything deterministic, in dependency order. bench is separate on purpose:
 # its numbers are machine-dependent by nature, while everything `all` produces
 # must match the README exactly on any machine.
-all: data test eval demo
+all: data test eval demo check

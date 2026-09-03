@@ -1,5 +1,7 @@
 # Spandan
 
+[![ci](https://github.com/ShivamMalge/Spandan/actions/workflows/ci.yml/badge.svg)](https://github.com/ShivamMalge/Spandan/actions/workflows/ci.yml)
+
 A deterministic streaming detector for card-testing and velocity abuse on card
 authorization traffic, with a Rust core, a bit-exact Python reference, and an
 evaluation harness that prices its own false positives in rupees.
@@ -48,7 +50,7 @@ strictly defense-only. Where each clause is met, and what proves it:
 Four evaluation criteria are reported for this buildathon by secondary
 coverage — not on the official page, so treated as reported. Where each lives:
 **Problem taste** — the loss class and the rupee model, above. **Build quality**
-— 118 Python and 33 Rust tests, two engines bit-exact over 1.6M events,
+— 119 Python and 33 Rust tests, two engines bit-exact over 1.6M events,
 reproduction from a fresh clone. **AI judgment** — the language model is
 structurally unable to reach a number and its notes are validated; see *Where
 AI is*. **Failure recovery** — [BUILD_LOG.md](docs/BUILD_LOG.md): twelve entries,
@@ -116,13 +118,16 @@ python -m venv .venv && . .venv/Scripts/activate    # Windows; use bin/activate 
 make setup                                          # pip install -e .[dev] + maturin build
 make data                                           # generate streams        ~2 min
 make eval                                           # full evaluation         ~14 min
+make check                                          # every documented figure against that run
 ```
 
 `make eval ENGINE=rust` runs the same evaluation through the Rust core and produces
-a byte-identical metrics JSON. `make test` runs 118 Python tests (~13 min, several
+a byte-identical metrics JSON. `make test` runs 119 Python tests (~13 min, several
 build streams and run full evaluations) and `cargo test` runs 33 Rust tests.
 `make bench` reproduces [docs/BENCH.md](docs/BENCH.md). `make all` chains data,
-test, eval and demo.
+test, eval, demo and check. CI runs the test suite in one job and `make data`,
+`make eval` and `make check` in a parallel job on ubuntu, so every push regenerates
+the stream and the evaluation from nothing and fails if any documented figure moves.
 
 ```
 spandan replay --data data --limit 20000     # streaming demo with rupee exposure
@@ -514,8 +519,9 @@ python/spandan/detect/  Detector interface, Python reference (the spec), Rust ad
 python/spandan/eval/  Temporal loader, metrics, rupee cost model, evaluation harness, benchmarks
 python/spandan/triage/  The post-detection graph: nodes, routing table, audit trail, kill-switch
 python/spandan/llm/   Bounded explanation layer, grounding validator, cassettes, comparison target
-tests/                118 tests: generator, detector, cross-engine parity, evaluation, triage graph, LLM boundary
-docs/                 ARCHITECTURE, FAILURE_MODES, BENCH, BUILD_LOG, PHASES
+tests/                119 tests: generator, detector, cross-engine parity, evaluation, triage graph, LLM boundary
+docs/                 ARCHITECTURE, FAILURE_MODES, BENCH, BUILD_LOG, PHASES, AUDIT, agents (house rules)
+scripts/              check_figures.py - every documented figure against the build (make check)
 ```
 
 Identifiers are drawn from reserved ranges — ISO/IEC 7812 MII-0 BINs, RFC 5737 and

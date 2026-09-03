@@ -188,7 +188,7 @@ def explain(argv: list[str] | None = None) -> int:
     from cassette. `--template` shows the deterministic no-LLM baseline instead,
     which is also the honest fallback a missing cassette suggests.
     """
-    R = _utf8()
+    _utf8()
     parser = argparse.ArgumentParser(prog="spandan explain")
     parser.add_argument("--flag-id", required=True, help="txn_id of the flagged event")
     parser.add_argument("--data", default="data")

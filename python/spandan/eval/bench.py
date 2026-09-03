@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import argparse
 import ctypes
-import ctypes.wintypes
 import gc
 import statistics
 import sys
@@ -47,61 +46,77 @@ BATCH_SIZES = (1, 10, 100, 1_000, 10_000, 100_000)
 PROJECTED_MONTHLY_ENTITIES = 8_000_000
 
 
-class _MemoryCounters(ctypes.Structure):
-    _fields_ = [
-        ("cb", ctypes.wintypes.DWORD),
-        ("PageFaultCount", ctypes.wintypes.DWORD),
-        ("PeakWorkingSetSize", ctypes.c_size_t),
-        ("WorkingSetSize", ctypes.c_size_t),
-        ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
-        ("QuotaPagedPoolUsage", ctypes.c_size_t),
-        ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
-        ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
-        ("PagefileUsage", ctypes.c_size_t),
-        ("PeakPagefileUsage", ctypes.c_size_t),
-    ]
+#: RSS is read through Win32 process counters (see `_memory_counters`). On any
+#: other platform the throughput and latency benches still run; the memory
+#: sections are reported as unavailable rather than crashing on import.
+MEMORY_SUPPORTED = sys.platform == "win32"
+
+if MEMORY_SUPPORTED:
+    import ctypes.wintypes
+
+    class _MemoryCounters(ctypes.Structure):
+        _fields_ = [
+            ("cb", ctypes.wintypes.DWORD),
+            ("PageFaultCount", ctypes.wintypes.DWORD),
+            ("PeakWorkingSetSize", ctypes.c_size_t),
+            ("WorkingSetSize", ctypes.c_size_t),
+            ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+            ("PagefileUsage", ctypes.c_size_t),
+            ("PeakPagefileUsage", ctypes.c_size_t),
+        ]
 
 
-def _memory_counters() -> _MemoryCounters:
-    """Process memory counters via Win32, no new dependency.
+    def _memory_counters() -> _MemoryCounters:
+        """Process memory counters via Win32, no new dependency.
 
-    Modern Windows exports this as `K32GetProcessMemoryInfo` on kernel32; the
-    old psapi name resolves on some systems and silently fails on others, which
-    is exactly what happened on the first run of this benchmark - every RSS
-    column read 0.0MB and the numbers looked plausible enough to almost ship.
-    The return value is checked now, so a failure raises instead of reporting a
-    memory measurement that measured nothing.
-    """
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    info = kernel32.K32GetProcessMemoryInfo
-    # Without declared types, ctypes passes the process pseudo-handle through a
-    # default c_int, which truncates it on 64-bit and the call fails. That is
-    # the failure the ok-check below caught on this benchmark's second run.
-    info.argtypes = [
-        ctypes.wintypes.HANDLE,
-        ctypes.POINTER(_MemoryCounters),
-        ctypes.wintypes.DWORD,
-    ]
-    info.restype = ctypes.wintypes.BOOL
-    current = kernel32.GetCurrentProcess
-    current.restype = ctypes.wintypes.HANDLE
+        Modern Windows exports this as `K32GetProcessMemoryInfo` on kernel32; the
+        old psapi name resolves on some systems and silently fails on others, which
+        is exactly what happened on the first run of this benchmark - every RSS
+        column read 0.0MB and the numbers looked plausible enough to almost ship.
+        The return value is checked now, so a failure raises instead of reporting a
+        memory measurement that measured nothing.
+        """
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        info = kernel32.K32GetProcessMemoryInfo
+        # Without declared types, ctypes passes the process pseudo-handle through a
+        # default c_int, which truncates it on 64-bit and the call fails. That is
+        # the failure the ok-check below caught on this benchmark's second run.
+        info.argtypes = [
+            ctypes.wintypes.HANDLE,
+            ctypes.POINTER(_MemoryCounters),
+            ctypes.wintypes.DWORD,
+        ]
+        info.restype = ctypes.wintypes.BOOL
+        current = kernel32.GetCurrentProcess
+        current.restype = ctypes.wintypes.HANDLE
 
-    counters = _MemoryCounters()
-    counters.cb = ctypes.sizeof(counters)
-    if not info(current(), ctypes.byref(counters), counters.cb):
-        raise OSError(
-            f"K32GetProcessMemoryInfo failed (err {ctypes.get_last_error()}); "
-            "RSS figures would be fiction"
-        )
-    return counters
-
-
-def _peak_rss_bytes() -> int:
-    return _memory_counters().PeakWorkingSetSize
+        counters = _MemoryCounters()
+        counters.cb = ctypes.sizeof(counters)
+        if not info(current(), ctypes.byref(counters), counters.cb):
+            raise OSError(
+                f"K32GetProcessMemoryInfo failed (err {ctypes.get_last_error()}); "
+                "RSS figures would be fiction"
+            )
+        return counters
 
 
-def _current_rss_bytes() -> int:
-    return _memory_counters().WorkingSetSize
+    def _peak_rss_bytes() -> int:
+        return _memory_counters().PeakWorkingSetSize
+
+
+    def _current_rss_bytes() -> int:
+        return _memory_counters().WorkingSetSize
+
+else:
+
+    def _peak_rss_bytes() -> int:  # type: ignore[misc]
+        raise NotImplementedError("RSS measurement uses Win32 counters; unavailable on this platform")
+
+    def _current_rss_bytes() -> int:  # type: ignore[misc]
+        raise NotImplementedError("RSS measurement uses Win32 counters; unavailable on this platform")
 
 
 # --- throughput and latency ---------------------------------------------------
@@ -280,7 +295,8 @@ def main(argv: list[str] | None = None) -> int:
 
     events = read_stream(Path(args.data) / TRAIN_FILENAME)[: args.limit]
     print(f"benchmark stream: {len(events):,} events from {args.data}/{TRAIN_FILENAME}")
-    print(f"peak RSS at start: {_peak_rss_bytes()/1e6:,.0f} MB")
+    if MEMORY_SUPPORTED:
+        print(f"peak RSS at start: {_peak_rss_bytes()/1e6:,.0f} MB")
     print()
 
     print("=" * 78)
@@ -320,42 +336,50 @@ def main(argv: list[str] | None = None) -> int:
             f"{row['p95_us']:>10.2f}{row['p99_us']:>10.2f}"
         )
 
-    print()
-    print("=" * 78)
-    print("MEMORY - full stream")
-    print("=" * 78)
-    rss_rows = bench_full_stream_rss(events)
-    print(f"{'engine':>9}{'events':>10}{'entities':>10}{'RSS grown':>12}")
-    for row in rss_rows:
-        print(
-            f"{row['engine']:>9}{row['events']:>10,}{row['entities']:>10,}"
-            f"{row['rss_grown_mb']:>10.1f}MB"
-        )
+    if not MEMORY_SUPPORTED:
+        print()
+        print("MEMORY sections skipped: RSS is measured through Win32 process counters,")
+        print("which this platform does not have. docs/BENCH.md section 4 holds the")
+        print("dated Windows measurement; the throughput tables above ran here.")
+        return 0
 
-    print()
-    print("=" * 78)
-    print("MEMORY - high-cardinality churn (nearly every event a new IP + device)")
-    print("=" * 78)
-    print("entities are NEVER FREED: total memory is linear in distinct entity count.")
-    print("this measures the slope. 'bounded memory' means bounded PER ENTITY only.")
-    print()
-    churn_rows = [bench_churn("rust"), bench_churn("python")]
-    print(f"{'engine':>9}{'events':>10}{'entities':>11}{'RSS grown':>12}{'bytes/entity':>14}"
-          f"{'proj. monthly':>15}")
-    for row in churn_rows:
-        print(
-            f"{row['engine']:>9}{row['events']:>10,}{row['entities']:>11,}"
-            f"{row['rss_grown_mb']:>10.1f}MB{row['bytes_per_entity']:>14,.0f}"
-            f"{row['projected_monthly_gb']:>13.1f}GB"
-        )
-    print()
-    print(f"projection basis: {PROJECTED_MONTHLY_ENTITIES:,} distinct entities/month")
-    print("(ASSUMPTION - see bench.py docstring; the projection is linear, so any other")
-    print("cardinality is one multiplication away). The unbuilt fix - LRU eviction or a")
-    print("count-min sketch, each trading accuracy for a hard cap - is FAILURE_MODES 7.")
+    if MEMORY_SUPPORTED:
+        print()
+        print("=" * 78)
+        print("MEMORY - full stream")
+        print("=" * 78)
+        rss_rows = bench_full_stream_rss(events)
+        print(f"{'engine':>9}{'events':>10}{'entities':>10}{'RSS grown':>12}")
+        for row in rss_rows:
+            print(
+                f"{row['engine']:>9}{row['events']:>10,}{row['entities']:>10,}"
+                f"{row['rss_grown_mb']:>10.1f}MB"
+            )
 
-    print()
-    print(f"peak RSS at end: {_peak_rss_bytes()/1e6:,.0f} MB (process-wide, both engines)")
+        print()
+        print("=" * 78)
+        print("MEMORY - high-cardinality churn (nearly every event a new IP + device)")
+        print("=" * 78)
+        print("entities are NEVER FREED: total memory is linear in distinct entity count.")
+        print("this measures the slope. 'bounded memory' means bounded PER ENTITY only.")
+        print()
+        churn_rows = [bench_churn("rust"), bench_churn("python")]
+        print(f"{'engine':>9}{'events':>10}{'entities':>11}{'RSS grown':>12}{'bytes/entity':>14}"
+              f"{'proj. monthly':>15}")
+        for row in churn_rows:
+            print(
+                f"{row['engine']:>9}{row['events']:>10,}{row['entities']:>11,}"
+                f"{row['rss_grown_mb']:>10.1f}MB{row['bytes_per_entity']:>14,.0f}"
+                f"{row['projected_monthly_gb']:>13.1f}GB"
+            )
+        print()
+        print(f"projection basis: {PROJECTED_MONTHLY_ENTITIES:,} distinct entities/month")
+        print("(ASSUMPTION - see bench.py docstring; the projection is linear, so any other")
+        print("cardinality is one multiplication away). The unbuilt fix - LRU eviction or a")
+        print("count-min sketch, each trading accuracy for a hard cap - is FAILURE_MODES 7.")
+
+        print()
+        print(f"peak RSS at end: {_peak_rss_bytes()/1e6:,.0f} MB (process-wide, both engines)")
     return 0
 
 
