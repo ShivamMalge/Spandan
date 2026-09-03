@@ -1,0 +1,12 @@
+{
+ "key": "a39301b46535386cedef72f875b43af0",
+ "model": "claude-haiku-4-5",
+ "prompt": "You are writing a 5-second triage note for a payments fraud analyst.\n\nA streaming card-testing detector flagged (declined) one transaction. The\nevidence below is everything known; every number is already computed. Do NOT\nrestate scores or recompute arithmetic. Your note's entire value is judgement:\nwhat the traffic pattern means, what would make this a FALSE POSITIVE (the\nanalyst's fastest action is recognising the benign explanation), and the single\nnext action.\n\nFormat, exactly four parts, total under 140 words:\n1. one bold headline: amount, BIN, merchant, the suspected pattern\n2. what the pattern means, referencing the evidence in plain terms\n3. \"Dismiss it if:\" - the concrete benign explanations for THIS evidence\n4. \"Next:\" - one action with a concrete decision rule\n\nEvidence:\n- merchant mer_008, BIN 099813\n- window: 1 event(s), 1 declined (ratio 100%; this BIN's baseline 10%)\n- mean amount in window Rs 5.45; baseline ticket Rs 2833\n- velocity 0.0 standard deviations above baseline of 1.1 events/window\n- 1 distinct card(s), 1.00 cards/event; 1 merchant(s) in window\n- ring buffer saturated: False\n- score 24.28 against threshold 21.99 (context only - do not cite)\n",
+ "recorded_via": "anthropic messages api via the anthropic python sdk 1.3.0, model claude-haiku-4-5 (served as claude-haiku-4-5-20251001), default sampling, max_tokens 700, SPANDAN_LLM_MODE=record",
+ "response_text": "**Rs 5.45 at mer_008, BIN 099813 \u2014 micro-transaction decline spike**\n\nSingle tiny charge declined at one merchant. The decline rate (100%) is 10x this BIN's norm, but velocity is unremarkable and only one attempt occurred. The amount (Rs 5.45 vs baseline Rs 2833) is drastically smaller than typical\u2014opposite of fraud scaling behavior.\n\n**Dismiss it if:** Merchant experienced a temporary processing error or gateway timeout on a legitimate small purchase (subscription trial, sample fee, or app micro-transaction). Card-testing attacks use low amounts to probe validity, but one declined attempt with no retry pattern is weak signal.\n\n**Next:** Check merchant mer_008's decline logs for processing errors in the last hour. If gateway/auth issues found, close as false positive. If clean, request cardholder confirmation of the Rs 5.45 charge within 24 hours.",
+ "stop_reason": "end_turn",
+ "usage": {
+  "input_tokens": 333,
+  "output_tokens": 207
+ }
+}

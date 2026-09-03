@@ -69,7 +69,20 @@ not re-prompted, not curated. Re-prompting until a nicer sample appears and
 shipping that one would be the same error as selecting a threshold on the test
 set: the flawed output IS the finding.
 
-**The model output is not better than the hand-written target. It is worse, in
+Recorded 2026-09-03: `claude-haiku-4-5` through the Anthropic API, the ₹5.45
+probe with the plain prompt (`a39301b4…`, accepted by the validator) and with
+the grounded prompt (`424749a7…`, rejected), both kept exactly as returned. The
+accepted note is grounded — nothing outside the prompt — and not better than
+this target: its dismissal test is generic (processing error, gateway timeout,
+small legitimate purchase), its next action has no decision rule, and it
+contradicts itself on whether a tiny amount points toward or away from card
+testing. The grounded-prompt note reaches for the decline code and AVS result
+it was told do not exist, and calls the BIN's baseline "this card's". Against
+this target, on this case: the template is at least as good, and it is
+deterministic. The ₹150 pair is still to be recorded; the verdict on the
+ambiguous case, below, remains the in-context one until it is.
+
+**The Gemini output is not better than the hand-written target. It is worse, in
 two ways that matter more than style.**
 
 **1. It fabricates evidence.** The ₹5.45 note's only decision rule is "Block

@@ -849,25 +849,54 @@ Run over the committed cassettes (`spandan validate-cassettes`):
 |---|---|---|---|
 | `9738bd8f…` (₹5.45 probe) | gemini-3.1-flash-lite | **REJECTED** | cites CVV/CVC result; cites AVS result |
 | `7e36f73e…` (₹150 sale FP) | gemini-3.1-flash-lite | **REJECTED** | cites decline reason code; cites per-card history; cites IP address |
+| `a39301b4…` (₹5.45 probe, plain prompt) | claude-haiku-4-5 | accepted | — |
+| `424749a7…` (₹5.45 probe, grounded prompt) | claude-haiku-4-5 | **REJECTED** | cites AVS result; cites decline reason code |
 
-**2 of 2 rejected**, each on the exact fabrication the reading found. The
-deterministic template passes the same validator by construction
-(`test_validator_accepts_the_template`), which is the property that makes it
-the fallback.
+**3 of 4 rejected.** The two Gemini notes each on the exact fabrication the
+reading found. The deterministic template passes the same validator by
+construction (`test_validator_accepts_the_template`), which is the property
+that makes it the fallback. The Haiku pair, recorded 2026-09-03 through the
+Anthropic API and kept exactly as returned, is a different finding in each
+half:
+
+- **Plain prompt, accepted.** The first recorded note to survive the validator:
+  every amount and percentage is in the prompt and no field outside it is
+  named. Its judgement is uneven — it calls the ₹5.45 amount "opposite of
+  fraud scaling behavior" and two sentences later says card testing uses low
+  amounts — and its next action ("check merchant mer_008's decline logs",
+  "request cardholder confirmation") has no decision rule tied to the
+  evidence, where the template's does. Grounded, and no sharper than the
+  template on this case.
+- **Grounded prompt, rejected — and not for invented evidence.** Told that the
+  decline code and AVS result do not exist, the model made obtaining them its
+  next action and conditioned the release on them ("Request decline reason
+  code from processor. If the decline was … AVS mismatch … release the
+  card"). It does not claim to hold those fields; it conditions the action on
+  data it was told is unavailable, which the grounding rule forbids in so many
+  words and the deny-list catches by mention. It also calls the BIN's baseline
+  ticket "this card's baseline" — a card-level claim this pipeline cannot
+  make — and the deny-list did **not** catch that. One sample; whether
+  enumerating the missing fields primed the model to reach for them is a
+  question this table cannot answer yet.
 
 What ships is therefore: the model's note **if** it cites nothing outside its
-prompt, the template otherwise. On the two recorded notes that means the
-template both times. What the validator cannot do, stated so nobody over-reads
-it: it cannot tell a wrong inference from a right one — a note that reasons
-badly from real evidence passes. It catches the failure class that was
-actually observed, invented evidence, and nothing more.
+prompt, the template otherwise. On the four recorded notes that means the
+template three times and the model once. What the validator cannot do, stated
+so nobody over-reads it: it cannot tell a wrong inference from a right one — a
+note that reasons badly from real evidence passes, and the accepted Haiku note
+shows what that looks like; it cannot tell citing a field from recommending its
+retrieval, because it works by mention; and it cannot catch a mis-attribution
+that uses allowed words, as "this card's baseline" did. It catches the failure
+class that was actually observed on the Gemini notes, invented evidence, and
+nothing more.
 
-A second prompt variant (`render_prompt(flag, grounded=True)`) adds an explicit
-enumeration of what this pipeline does not have. Whether telling the model
-changes its behaviour is a measured question: two more cassettes are to be
-recorded with it and run through the same validator, and the result — whatever
-it is — goes in this table. Until they exist, the claim is only that the
-validator catches what was recorded, not that the grounded prompt prevents it.
+The second prompt variant (`render_prompt(flag, grounded=True)`) adds an explicit
+enumeration of what this pipeline does not have. On the one flag recorded with
+it so far, telling the model did not stop it reaching for those fields; the
+₹150 pair (plain and grounded) is still to be recorded and goes in this table
+when it exists. Until then the claim is only what the table shows: the
+validator catches what was recorded, one note in four was grounded, and the
+grounded prompt did not prevent the reach it was written to prevent.
 
 ## 9. Learned weights versus hand weights
 
