@@ -59,9 +59,17 @@ jobs:
       - name: pytest
         env:
           PYTHONIOENCODING: utf-8
+        # Job logs are not readable through the API without admin rights;
+        # annotations are. On failure every FAILED/ERROR summary line is
+        # re-emitted as an annotation so the failing tests are visible there.
         run: |
           . .venv/bin/activate
-          pytest -q
+          set -o pipefail
+          if ! pytest -q -rfE 2>&1 | tee pytest.log; then
+            grep -E "^(FAILED|ERROR) " pytest.log | sed "s/^/::error::/"
+            tail -n 1 pytest.log | sed "s/^/::notice::/"
+            exit 1
+          fi
 
       - name: the graph compiles and renders from its declaration
         run: |
