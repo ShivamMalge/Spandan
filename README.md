@@ -517,7 +517,7 @@ one model in the system has been shown to invent evidence. Detail in
   model output fabricated fields the schema does not contain — CVV/AVS results,
   per-card history — and the cassettes are committed as returned. A validator
   (`llm/grounding.py`) now rejects any note that cites evidence outside the prompt
-  it was generated from: 3 of 4 recorded notes rejected, the one accepted note
+  it was generated from: 4 of 5 recorded notes rejected, the one accepted note
   grounded and no sharper than the template, the template passes by
   construction, and `explain_flag` returns a model note only when it is grounded.
   [FAILURE_MODES.md](docs/FAILURE_MODES.md) §8.

@@ -79,8 +79,17 @@ contradicts itself on whether a tiny amount points toward or away from card
 testing. The grounded-prompt note reaches for the decline code and AVS result
 it was told do not exist, and calls the BIN's baseline "this card's". Against
 this target, on this case: the template is at least as good, and it is
-deterministic. The ₹150 pair is still to be recorded; the verdict on the
-ambiguous case, below, remains the in-context one until it is.
+deterministic.
+
+The ₹150 case with the plain prompt (`3cf90c49…`, rejected: names the merchant
+category and builds its decision rule on a 50% threshold that is in no
+evidence) is the one that matters for the claim below. Over the wire the model
+did **not** re-rank toward the sale: it read ₹150 as an "atypical low amount"
+and dismissed the flag as n=1 noise, with no mention of a price point. The
+paragraph below describes the in-context note, written by an author who had
+read this target; it did not reproduce on the first wire sample, and it stands
+as a description of that note, not of what the API returns. The grounded-prompt
+recording of this case is still to be made.
 
 **The Gemini output is not better than the hand-written target. It is worse, in
 two ways that matter more than style.**

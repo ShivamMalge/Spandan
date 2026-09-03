@@ -851,13 +851,13 @@ Run over the committed cassettes (`spandan validate-cassettes`):
 | `7e36f73e…` (₹150 sale FP) | gemini-3.1-flash-lite | **REJECTED** | cites decline reason code; cites per-card history; cites IP address |
 | `a39301b4…` (₹5.45 probe, plain prompt) | claude-haiku-4-5 | accepted | — |
 | `424749a7…` (₹5.45 probe, grounded prompt) | claude-haiku-4-5 | **REJECTED** | cites AVS result; cites decline reason code |
+| `3cf90c49…` (₹150 sale FP, plain prompt) | claude-haiku-4-5 | **REJECTED** | cites merchant category; figure 50% not in the evidence |
 
-**3 of 4 rejected.** The two Gemini notes each on the exact fabrication the
+**4 of 5 rejected.** The two Gemini notes each on the exact fabrication the
 reading found. The deterministic template passes the same validator by
 construction (`test_validator_accepts_the_template`), which is the property
-that makes it the fallback. The Haiku pair, recorded 2026-09-03 through the
-Anthropic API and kept exactly as returned, is a different finding in each
-half:
+that makes it the fallback. The Haiku notes, recorded 2026-09-03 through the
+Anthropic API and kept exactly as returned, are a different finding each:
 
 - **Plain prompt, accepted.** The first recorded note to survive the validator:
   every amount and percentage is in the prompt and no field outside it is
@@ -878,10 +878,19 @@ half:
   make — and the deny-list did **not** catch that. One sample; whether
   enumerating the missing fields primed the model to reach for them is a
   question this table cannot answer yet.
+- **₹150 sale, plain prompt, rejected.** Two reaches: "check merchant
+  category", a field the pipeline does not carry, and a decision rule built on
+  a 50% decline threshold that appears nowhere in the evidence — the validator
+  treats every percentage as a claim about the evidence, and an invented
+  threshold is caught by the same rule as an invented measurement. More telling
+  than the rejection: this is the ambiguous case where `TARGET.md` argued a
+  model note could beat the template by reading ₹150 as a price point and
+  leading with "check for a sale first". Over the wire it did not: it read
+  ₹150 as an "atypical low amount" and dismissed the flag as n=1 noise.
 
 What ships is therefore: the model's note **if** it cites nothing outside its
-prompt, the template otherwise. On the four recorded notes that means the
-template three times and the model once. What the validator cannot do, stated
+prompt, the template otherwise. On the five recorded notes that means the
+template four times and the model once. What the validator cannot do, stated
 so nobody over-reads it: it cannot tell a wrong inference from a right one — a
 note that reasons badly from real evidence passes, and the accepted Haiku note
 shows what that looks like; it cannot tell citing a field from recommending its
@@ -893,10 +902,10 @@ nothing more.
 The second prompt variant (`render_prompt(flag, grounded=True)`) adds an explicit
 enumeration of what this pipeline does not have. On the one flag recorded with
 it so far, telling the model did not stop it reaching for those fields; the
-₹150 pair (plain and grounded) is still to be recorded and goes in this table
-when it exists. Until then the claim is only what the table shows: the
-validator catches what was recorded, one note in four was grounded, and the
-grounded prompt did not prevent the reach it was written to prevent.
+₹150 grounded-prompt note is still to be recorded and goes in this table when
+it exists. Until then the claim is only what the table shows: the validator
+catches what was recorded, one note in five was grounded, and the grounded
+prompt did not prevent the reach it was written to prevent.
 
 ## 9. Learned weights versus hand weights
 
