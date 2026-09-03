@@ -177,8 +177,21 @@ numpy has loaded (numpy reads `sys.platform` at import). `agents.md` moved to
 The gate held: `make eval` before and after the harness deletion diff identical
 with timing lines excluded, and `metrics.json` identical field for field. 119
 Python tests pass (the 118 plus the bench guard); clippy clean; the detector diff
-is empty. CI: the first run on the landing push is recorded in the line below
-once it completes, not before.
+is empty.
+
+CI went green at eb9aa3f (run 33710648936: `test` 4 min, `figures` 10 min)
+after three red runs, each a real finding. First, the workflow installed an
+unpinned ruff and 0.16 enabled rules 0.15.21 does not, three of them inside the
+frozen `reference.py`; pinned. Second, the bench-guard test faked win32 on a
+Linux host and called counters that do not exist there; the live half now runs
+only on Windows. Third, and the one worth the detour: the parity fixture is
+exact to the Windows C runtime, and under glibc 640 of its 3,866 scores move
+by up to 2.8e-14 (BUILD_LOG, 2026-09-03, entry 13). The fixture tests compare
+within the 1e-9 the fixture declares off Windows. The `figures` job passed on
+every run, red or green: `make data`, `make eval` and `make check` reproduce
+all 31 documented figures on ubuntu, and Rust-versus-Python parity on Linux
+held at zero delta. Job logs need admin rights through the API; the pytest
+step now re-emits its failure summary as annotations, which do not.
 
 **Effort.** 3h. **Risk: low** — the harness edit is a deletion, and the eval
 diff catches any accident. Gains: axis 5 → 9, axis 6 → 9.5, axis 10 → 8.

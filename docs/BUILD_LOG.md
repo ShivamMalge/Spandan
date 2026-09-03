@@ -438,6 +438,10 @@ real detector change moves scores by far more than 1e-9. Test-only;
 `git diff --stat` on `python/spandan/detect` and `spandan-core` is empty.
 **Proved by:** both tests pass on Windows (the exact branch) and under WSL
 glibc (the tolerance branch, pure-Python reference with the extension stubbed).
+The pre-fix CI run, once its failures were re-emitted as annotations, showed
+exactly these two tests failing and the other 117 passing on ubuntu — the six
+Rust-versus-Python parity tests among them, at zero delta. The next run
+(33710648936, eb9aa3f) was green in both jobs.
 **Worth noting:** "bit-exact" in this repository means the two engines agree
 with each other on one machine, and the parity test on that machine still
 demands zero difference. Across C runtimes the reference itself moves at the
