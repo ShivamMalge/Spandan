@@ -89,7 +89,10 @@ and dismissed the flag as n=1 noise, with no mention of a price point. The
 paragraph below describes the in-context note, written by an author who had
 read this target; it did not reproduce on the first wire sample, and it stands
 as a description of that note, not of what the API returns. The grounded-prompt
-recording of this case is still to be made.
+recording of this case (`767d03f7…`, rejected on naming CVV/AVS while marking
+them unavailable) did not re-rank toward the sale either. Two wire samples,
+zero re-rankings: on the ambiguous case the model call has not earned its place
+over the template.
 
 **The Gemini output is not better than the hand-written target. It is worse, in
 two ways that matter more than style.**

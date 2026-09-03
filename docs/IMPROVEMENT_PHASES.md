@@ -334,6 +334,20 @@ python -m spandan.cli validate-cassettes                 # one verdict per casse
 ls python/spandan/llm/cassettes/ | wc -l                 # 6: 2 gemini plain, 2 haiku plain, 2 haiku grounded
 ```
 
+**Measured (Sep 3).** Part 1 landed on Sep 3 (validator, exit 4, `validate-cassettes`).
+Part 2 recorded on Sep 3 through the Anthropic API with `claude-haiku-4-5`, the
+provider having moved once more (Groq was never recorded on). Six cassettes,
+kept exactly as returned: **5 of 6 rejected**. The two Gemini notes assert
+invented evidence; the Haiku plain note on the probe is the one accepted note
+(grounded, no sharper than the template); the Haiku plain note on the sale
+names the merchant category and invents a 50% threshold; both grounded-prompt
+notes name the missing fields, one to go and fetch them, one marking them
+"unavailable here" as the grounding rule itself instructs — which exposed that
+the grounded prompt permits what the validator forbids. Left as found and
+named in §8. On the ambiguous ₹150 case, neither wire sample re-ranked toward
+the sale; TARGET.md now says the in-context claim did not reproduce. The
+poisoned-import test stayed green throughout; 18 boundary tests.
+
 **Effort.** 3h. **Risk: low.** Gains: axis 7 → 7, axis 9 → 9.
 
 **Why axis 7 stops at 7, in writing.** This is an "AI Risk Manager" track and

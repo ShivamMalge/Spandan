@@ -852,8 +852,9 @@ Run over the committed cassettes (`spandan validate-cassettes`):
 | `a39301b4…` (₹5.45 probe, plain prompt) | claude-haiku-4-5 | accepted | — |
 | `424749a7…` (₹5.45 probe, grounded prompt) | claude-haiku-4-5 | **REJECTED** | cites AVS result; cites decline reason code |
 | `3cf90c49…` (₹150 sale FP, plain prompt) | claude-haiku-4-5 | **REJECTED** | cites merchant category; figure 50% not in the evidence |
+| `767d03f7…` (₹150 sale FP, grounded prompt) | claude-haiku-4-5 | **REJECTED** | cites CVV/CVC result; cites AVS result — both marked "unavailable here" by the note itself |
 
-**4 of 5 rejected.** The two Gemini notes each on the exact fabrication the
+**5 of 6 rejected.** The two Gemini notes each on the exact fabrication the
 reading found. The deterministic template passes the same validator by
 construction (`test_validator_accepts_the_template`), which is the property
 that makes it the fallback. The Haiku notes, recorded 2026-09-03 through the
@@ -887,10 +888,24 @@ Anthropic API and kept exactly as returned, are a different finding each:
   model note could beat the template by reading ₹150 as a price point and
   leading with "check for a sale first". Over the wire it did not: it read
   ₹150 as an "atypical low amount" and dismissed the flag as n=1 noise.
+- **₹150 sale, grounded prompt, rejected — by a validator that disagrees with
+  the prompt.** Every number in the note is in the evidence and nothing is
+  asserted as known that is not. The note names CVV/AVS and the decline reason
+  as things a fuller review would use and marks each "(unavailable here)" —
+  which is what the grounding rule told it to do: "if the right next action
+  would need data that is not listed, say the data is unavailable here". The
+  deny-list rejects the mention regardless. So the grounded prompt permits
+  what the validator forbids, and a note that follows the prompt to the letter
+  cannot pass. That is a design inconsistency in this layer, found by
+  recording rather than by reading, and it is left as found: either the
+  prompt must forbid naming the missing fields at all, or the validator must
+  accept a mention marked unavailable. Neither change is made here, because
+  the result of the change would be a new measurement, not this one. And once
+  more the model did not re-rank toward the sale.
 
 What ships is therefore: the model's note **if** it cites nothing outside its
-prompt, the template otherwise. On the five recorded notes that means the
-template four times and the model once. What the validator cannot do, stated
+prompt, the template otherwise. On the six recorded notes that means the
+template five times and the model once. What the validator cannot do, stated
 so nobody over-reads it: it cannot tell a wrong inference from a right one — a
 note that reasons badly from real evidence passes, and the accepted Haiku note
 shows what that looks like; it cannot tell citing a field from recommending its
@@ -900,12 +915,16 @@ class that was actually observed on the Gemini notes, invented evidence, and
 nothing more.
 
 The second prompt variant (`render_prompt(flag, grounded=True)`) adds an explicit
-enumeration of what this pipeline does not have. On the one flag recorded with
-it so far, telling the model did not stop it reaching for those fields; the
-₹150 grounded-prompt note is still to be recorded and goes in this table when
-it exists. Until then the claim is only what the table shows: the validator
-catches what was recorded, one note in five was grounded, and the grounded
-prompt did not prevent the reach it was written to prevent.
+enumeration of what this pipeline does not have. Recorded on both flags: neither
+grounded note passed. On the probe the model reached for the missing fields as
+its next action; on the sale it named them and marked them unavailable, as the
+rule instructs, and the validator rejected the mention anyway. Measured, the
+grounded prompt changes how the model talks about the missing fields, not
+whether it talks about them, and the validator does not distinguish the two.
+The claim this section makes is what the table shows and no more: the validator
+catches invented evidence, one note in six was grounded, the grounded prompt did
+not prevent the reach it was written to prevent, and the prompt and the
+validator need reconciling before the grounded variant can be judged fairly.
 
 ## 9. Learned weights versus hand weights
 
