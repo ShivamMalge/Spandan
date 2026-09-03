@@ -1,0 +1,3 @@
+graph compiles: 9 nodes, start=dedup, end=END
+  nodes: act, dedup, explain, exposure, ground, human_review, kill_switch, mode, template
+  the LLM node (explain) has one successor (ground) and no path to act or mode

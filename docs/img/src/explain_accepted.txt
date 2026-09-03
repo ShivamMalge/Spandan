@@ -1,0 +1,10 @@
+==============================================================================
+FLAG txn_000804993  mer_008  BIN 099813  score 24.28 (> 21.99)
+==============================================================================
+**Rs 5.45 at mer_008, BIN 099813 — micro-transaction decline spike**
+
+Single tiny charge declined at one merchant. The decline rate (100%) is 10x this BIN's norm, but velocity is unremarkable and only one attempt occurred. The amount (Rs 5.45 vs baseline Rs 2833) is drastically smaller than typical—opposite of fraud scaling behavior.
+
+**Dismiss it if:** Merchant experienced a temporary processing error or gateway timeout on a legitimate small purchase (subscription trial, sample fee, or app micro-transaction). Card-testing attacks use low amounts to probe validity, but one declined attempt with no retry pattern is weak signal.
+
+**Next:** Check merchant mer_008's decline logs for processing errors in the last hour. If gateway/auth issues found, close as false positive. If clean, request cardholder confirmation of the Rs 5.45 charge within 24 hours.

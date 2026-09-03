@@ -1,0 +1,23 @@
+OPERATING-POINT FRONTIER -- what each alert budget buys
+==============================================================================
+The threshold is chosen to maximise net rupees SUBJECT TO an alerts/day cap,
+not to maximise net rupees outright. The unconstrained criterion was selecting
+the operating point using a cost model that prices a wrongly-blocked declining
+transaction at almost nothing - so it bought recall with false positives.
+
+  budget   thresh  alerts/d  ev/alert  flag rate  declined    prec  prec@0.15%  recall  episodes  med TTD     val net    test net
+       2    27.99       2.1        90     0.0120    0.0037   0.696      0.2034   0.627     35/60        6     ₹82,806    ₹324,539
+       5    23.86       4.7        66     0.0191    0.0093   0.519      0.1073   0.745     58/60        5    ₹100,588    ₹322,004
+       8    22.36       8.3        46     0.0238    0.0130   0.462      0.0875   0.828     60/60        1    ₹114,196    ₹284,112
+      10    21.99       9.7        42     0.0252    0.0141   0.446      0.0824   0.844     60/60        0    ₹119,267    ₹279,151 <== HEADLINE
+      12    21.80      11.6        36     0.0259    0.0148   0.437      0.0797   0.850     60/60        0    ₹117,924    ₹272,040
+      15    21.61      14.2        30     0.0266    0.0154   0.428      0.0769   0.856     60/60        0    ₹117,030    ₹267,910
+      20    21.43      18.3        24     0.0274    0.0162   0.418      0.0740   0.862     60/60        0    ₹114,877    ₹254,638
+      30    21.43      18.3        24     0.0274    0.0162   0.418      0.0740   0.862     60/60        0    ₹114,877    ₹254,638
+      50    21.43      18.3        24     0.0274    0.0162   0.418      0.0740   0.862     60/60        0    ₹114,877    ₹254,638
+
+`prec@0.15%` is precision reweighted to a realistic merchant card-testing
+base rate. It is the number an operations team would actually live with.
+
+`declined` is the share of LEGITIMATE transactions the control declines -
+false positives over clean events. A flag declines, so this is what a merchant

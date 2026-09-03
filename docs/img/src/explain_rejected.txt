@@ -1,0 +1,22 @@
+[rejected] model note cited evidence it was never shown: cites merchant category, which this pipeline does not have; figure 50% does not appear in the evidence
+[rejected] note, for the record:
+**Rs 150 single decline at mer_004, BIN 012399 — atypical low amount**
+
+Card-testing typically fires on rapid micro-charges. This is one small transaction (Rs 150 vs. Rs 2658 baseline) at a single merchant with normal velocity. The 100% decline rate looks suspicious in isolation, but the window contains only one event—statistical noise with n=1.
+
+Dismiss it if: cardholder was testing payment method validity before a larger purchase, merchant processes legitimate small transactions (subscriptions, samples, deposits), or the amount simply fell below issuer's fraud threshold.
+
+Next: Check merchant category and historical decline rate at mer_004. If >50% of all BIN 012399 attempts decline there, escalate; otherwise close as false positive.
+==============================================================================
+FLAG txn_000806675  mer_004  BIN 012399  score 23.26 (> 21.99)
+==============================================================================
+
+explanation rejected by the validator; deterministic template instead:
+
+**Rs 150.00 declined attempt on BIN 012399 at mer_004 - fits card-testing, check for siblings.**
+
+1 event(s) in the window, 100% declined against a baseline of 9%. Mean amount Rs 150.00 vs baseline Rs 2,658.
+
+Dismiss it if: this merchant sells at this price point (top-ups, trial fees, COD holds), or the issuer is having an outage - outage declines cluster on one BIN too, but hit ordinary basket sizes and retry the same card.
+
+Next: hold auto-block; pull this BIN's last hour at this merchant. More tiny declines on distinct cards -> block the BIN here for 24h. Ordinary amounts declining too -> it's the issuer, stand down.

@@ -478,6 +478,18 @@ grep -n "docs/img" README.md                  # embedded
 python scripts/check_figures.py               # PASS — the pitch quotes no figure the check does not cover
 ```
 
+**Landed (Sep 3).** `docs/img/demo.gif`: three scenes rendered by
+`scripts/render_demo.py` from captured transcripts in `docs/img/src/` — the
+replay with the exposure counter (221 flags, 218 real, ₹8,407), the engine-swap
+diff (one line, the engine label), and `spandan explain` on the ₹150 false
+positive with the validator rejecting the model note and the template shipping,
+exit 4. Rendered rather than screen-captured so it regenerates from the same
+source as every other figure; the README says so beside it. `docs/img/frontier.png`
+(the operating-point table from the quoted run) and `docs/img/flag_card.png`
+(one flag, all six contributions, from the Flag the detector returns). `docs/PITCH.md`
+is the five-minute structure; the checker now verifies the figures it quotes
+against the same JSON as the README. All three images embedded in the README.
+
 **Effort.** 2h. **Risk: none.** Gains: axis 8 → 9, axis 10 → 9.
 
 ---

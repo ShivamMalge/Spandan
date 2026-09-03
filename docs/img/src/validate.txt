@@ -1,0 +1,20 @@
+cassette                           model                    verdict
+3cf90c4927c49f1addd9f335943ee3b3   claude-haiku-4-5         REJECTED
+                                                              - cites merchant category, which this pipeline does not have
+                                                              - figure 50% does not appear in the evidence
+424749a75f67c7bd3fbf49d9da9b984b   claude-haiku-4-5         REJECTED
+                                                              - cites AVS result, which this pipeline does not have
+                                                              - cites decline reason code, which this pipeline does not have
+767d03f73c30f5d354b3f710272d30b5   claude-haiku-4-5         REJECTED
+                                                              - cites CVV/CVC result, which this pipeline does not have
+                                                              - cites AVS result, which this pipeline does not have
+7e36f73e42cab59ec4f903a29c7b22d5   gemini-3.1-flash-lite    REJECTED
+                                                              - cites decline reason code, which this pipeline does not have
+                                                              - cites per-card history, which this pipeline does not have
+                                                              - cites IP address, which this pipeline does not have
+9738bd8f63262ce48ca28a3daaebbd1c   gemini-3.1-flash-lite    REJECTED
+                                                              - cites CVV/CVC result, which this pipeline does not have
+                                                              - cites AVS result, which this pipeline does not have
+a39301b46535386cedef72f875b43af0   claude-haiku-4-5         accepted
+
+5 of 6 rejected

@@ -1,0 +1,55 @@
+==============================================================================
+SPANDAN replay  test.jsonl.gz  20,000 events  threshold 21.99
+==============================================================================
+baselines warmed on 803,996 earlier events from train.jsonl.gz
+==============================================================================
+
+[FLAG] mer_008  BIN 099813  score 24.3 (> 22.0)
+       window 1 events, 100% declined (baseline 10%), 1 distinct cards
+       velocity 0.0sd above baseline of 1.1 events/window; mean amount ₹5 vs baseline ₹2,833
+       strongest evidence: decline_bin (+18.0 of 24.3)
+       running exposure prevented: ₹2
+
+[FLAG] mer_004  BIN 012399  score 23.3 (> 22.0)
+       window 1 events, 100% declined (baseline 9%), 1 distinct cards
+       velocity 0.0sd above baseline of 1.7 events/window; mean amount ₹150 vs baseline ₹2,658
+       strongest evidence: decline_bin (+18.2 of 23.3)
+       running exposure prevented: ₹15
+
+[FLAG] mer_008  BIN 099813  score 23.4 (> 22.0)
+       window 1 events, 100% declined (baseline 10%), 1 distinct cards
+       velocity 0.0sd above baseline of 1.3 events/window; mean amount ₹12 vs baseline ₹2,810
+       strongest evidence: decline_bin (+17.9 of 23.4)
+       running exposure prevented: ₹16
+
+[FLAG] mer_009  BIN 094591  score 22.2 (> 22.0)
+       window 2 events, 100% declined (baseline 12%), 2 distinct cards
+       velocity 0.0sd above baseline of 2.1 events/window; mean amount ₹29 vs baseline ₹2,551
+       strongest evidence: decline_bin (+17.7 of 22.2)
+       running exposure prevented: ₹54
+
+[FLAG] mer_002  BIN 038000  score 22.9 (> 22.0)
+       window 1 events, 100% declined (baseline 8%), 1 distinct cards
+       velocity 0.0sd above baseline of 1.2 events/window; mean amount ₹68 vs baseline ₹2,621
+       strongest evidence: decline_bin (+18.4 of 22.9)
+       running exposure prevented: ₹8,407
+
+[FLAG] mer_004  BIN 011757  score 23.3 (> 22.0)
+       window 2 events, 100% declined (baseline 9%), 2 distinct cards
+       velocity 0.8sd above baseline of 1.3 events/window; mean amount ₹1,101 vs baseline ₹2,686
+       strongest evidence: decline_bin (+18.3 of 23.3)
+       running exposure prevented: ₹8,407
+
+==============================================================================
+REPLAY SUMMARY
+==============================================================================
+events replayed                             20,000
+flagged                                        221
+of which truly card testing                    218
+exposure prevented                          ₹8,407
+
+flags by scenario (labels are for this readout only; the detector never saw them):
+  rotating             183   attack
+  slow_low              35   attack
+  benign                 2   CLEAN - false positive
+  flash_sale             1   CLEAN - false positive

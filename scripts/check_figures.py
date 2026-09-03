@@ -62,6 +62,7 @@ class Check:
         self.docs = {p: p.read_text(encoding="utf-8", errors="replace") for p in DOCS if p.exists()}
         self.readme = self.docs[ROOT / "README.md"]
         self.fm = self.docs[ROOT / "docs" / "FAILURE_MODES.md"]
+        self.pitch = self.docs.get(ROOT / "docs" / "PITCH.md", "")
         self.fails: list[str] = []
         self.count = 0
         self._json: dict[str, dict] = {}
@@ -123,6 +124,18 @@ def pass_positive(ck: Check) -> None:
         ("triage outage alerted", f"{tri['per_scenario']['outage_single_merchant']['alerted']:,}"),
     ]:
         ck.expect(label, ck.readme, token, "README")
+
+    # The pitch quotes the same figures; it must not drift from them.
+    for label, token in [
+        ("pitch p@base",       f"{metrics['precision_at_target_prevalence']:.4f}"),
+        ("pitch recall",       f"{metrics['recall']:.4f}"),
+        ("pitch 1 in N",       f"1 in {round(1 / metrics['legit_decline_rate'])}"),
+        ("pitch legit %",      f"{metrics['legit_decline_rate'] * 100:.2f}%"),
+        ("pitch triage trips", f"{tri['trips']} trips"),
+        ("pitch triage 1 in N", f"1 in {round(1 / tri['legit_decline_rate'])}"),
+        ("pitch outage %",     f"{ps['outage_single_merchant']['flagged'] / ps['outage_single_merchant']['events'] * 100:.1f}%"),
+    ]:
+        ck.expect(label, ck.pitch, token, "PITCH")
 
     # The 2.1a table in FAILURE_MODES carries the per-count triage figures.
     for label, token in [
@@ -249,6 +262,11 @@ def pass_baselines(ck: Check) -> None:
     boosted = bl["models"]["gbm9"]["per_scenario"]["outage_single_merchant"]
     ck.derived("45% outage under logreg6", round(outage["flagged"] / outage["events"] * 100) == 45, "45%", ck.readme)
     ck.derived("two in three under gbm9", 0.60 <= boosted["flagged"] / boosted["events"] <= 0.75, "two in three", ck.readme)
+    for name in ("logreg6", "hand"):
+        rows = [r for r in sm if r["model"] == name]
+        ck.expect(f"pitch {name} median p@base", ck.pitch, f"{spread(rows, 'precision_at_target_prevalence')[0]:.4f}", "PITCH")
+        ck.expect(f"pitch {name} median recall", ck.pitch, f"{spread(rows, 'recall')[0]:.4f}", "PITCH")
+    ck.derived("pitch 45% outage under logreg6", round(outage["flagged"] / outage["events"] * 100) == 45, "45%", ck.pitch, "PITCH")
 
 
 # -------------------------------------------------------------- 6. EXPERIMENT
@@ -268,6 +286,8 @@ def pass_experiment(ck: Check) -> None:
             ck.fails.append(f"data/{filename}: variant label is {ex.get('variant')!r}, expected {variant!r}")
         outage = ex["per_scenario"]["outage_single_merchant"]
         ck.expect(f"{variant} outage flag rate", ck.readme, f"{outage['flagged'] / outage['events'] * 100:.1f}%", "README")
+        ck.expect(f"{variant} outage flag rate", ck.pitch, f"{outage['flagged'] / outage['events'] * 100:.1f}%", "PITCH")
+        ck.expect(f"{variant} 1 in N", ck.pitch, f"1 in {round(1 / ex['legit_decline_rate'])}", "PITCH")
         for label, token in [
             (f"{variant} outage flag rate", f"{outage['flagged'] / outage['events'] * 100:.1f}%"),
             (f"{variant} outage flagged count", f"{outage['flagged']:,}/{outage['events']:,}"),
@@ -300,6 +320,7 @@ def pass_experiment(ck: Check) -> None:
             phrase = f"{(metrics['recall'] - ex['recall']) * 100:.1f} points"
             ck.derived("recall cost of the five-fold weight", True, phrase, ck.fm, "FAILURE_MODES")
             ck.derived("recall cost of the five-fold weight (README)", True, phrase, ck.readme, "README")
+            ck.derived("recall cost of the five-fold weight (PITCH)", True, phrase, ck.pitch, "PITCH")
         if metrics:
             full = [r for r in metrics["seed_matrix"] if r["variant"] == "full"]
             ck.count += 1

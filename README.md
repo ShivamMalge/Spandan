@@ -17,6 +17,13 @@ without touching a score. The detector-level fix, measured as an experiment,
 cuts that to 18.0% but fails its own ship gate and stays out of the detector.
 Every figure here reproduces from `make eval` on a fresh clone.
 
+![Terminal recording: spandan replay flags 221 of 20,000 test events with the exposure counter climbing; the Rust and Python evaluations differ in one line, the engine label; spandan explain rejects a model note for naming evidence the pipeline does not have and prints the template](docs/img/demo.gif)
+
+*Rendered from captured command output, not typed: `spandan replay`, the engine-swap
+diff of two `make eval` runs, and `spandan explain` on the ₹150 flash-sale false
+positive. `scripts/render_demo.py` regenerates it from `docs/img/src/`. The
+five-minute structure is in [docs/PITCH.md](docs/PITCH.md).*
+
 ## The problem
 
 Stolen card numbers are worthless until someone knows which ones still work. The
@@ -124,6 +131,8 @@ neither the blocked-good cost nor the avoided-chargeback saving can be claimed �
 the ₹348,845 net is an inline-blocking figure and does not transfer. Full frontier
 in [FAILURE_MODES.md](docs/FAILURE_MODES.md) §0.1.
 
+![The operating-point frontier printed by make eval: one row per alert budget, from budget 2 at 2.1 alerts a day and precision 0.2034 at the base rate to the headline row at budget 10](docs/img/frontier.png)
+
 ## Run it
 
 Requires Python ≥3.10 and a Rust toolchain.
@@ -170,6 +179,12 @@ order. `update()` returns a `Flag` when the event scores above the threshold and
 `None` otherwise. **Baselines are learned from the stream, so a cold detector
 scores nothing useful** — it needs history before its output means anything, which
 is why the snippet below replays the training window first.
+
+![One flag with all six score contributions: decline_bin +18.03, amount +6.25, the other four terms zero, summing to the score 24.28 against threshold 21.99](docs/img/flag_card.png)
+
+*What a `Flag` carries: the window evidence and every contribution to the score,
+read off the object the detector returns for `txn_000804993`. The six terms are the
+whole score.*
 
 ```python
 from pathlib import Path
@@ -546,6 +561,9 @@ python/spandan/llm/   Bounded explanation layer, grounding validator, cassettes,
 tests/                130 tests: generator, detector, cross-engine parity, evaluation, triage graph, LLM boundary
 docs/                 ARCHITECTURE, FAILURE_MODES, BENCH, BUILD_LOG, PHASES, AUDIT, agents (house rules)
 scripts/              check_figures.py - every documented figure against the build (make check)
+                      render_demo.py - the README recording and stills, from captured transcripts
+docs/img/             demo.gif, frontier.png, flag_card.png and the transcripts they are drawn from
+docs/PITCH.md         the five-minute structure; every number in it is one make check verifies
 ```
 
 Identifiers are drawn from reserved ranges — ISO/IEC 7812 MII-0 BINs, RFC 5737 and

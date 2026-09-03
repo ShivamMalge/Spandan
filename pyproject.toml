@@ -25,6 +25,8 @@ dev = [
     # `make setup` runs `maturin develop --release` after this install; without
     # maturin here it resolves only if one happens to be on PATH globally.
     "maturin>=1.14,<2.0",
+    # scripts/render_demo.py draws the README recording from captured transcripts.
+    "pillow>=10",
 ]
 # Recording cassettes only (SPANDAN_LLM_MODE=record). Not in dev: the suite
 # replays committed cassettes with sockets disabled and never imports this.
