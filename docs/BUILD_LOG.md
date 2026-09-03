@@ -477,10 +477,47 @@ ratios (the largest gap measured was 0.021, on the best-seed recall), 2% on
 net, 6% on the outage count, while the hand and logistic rows stay exact. The README's "70%" for the boosted model became "two in three",
 which is true on both platforms. Nothing about the finding changed.
 **Proved by:** the WSL comparison above (`baselines_linux.json` against
-`data/baselines.json`); the checker passing on both.
+`data/baselines.json`); the checker passing on both; the CI figures job green
+at c327dd9 (run 33744743775).
 **Worth noting:** this is the third time in a day the same fourteenth-decimal
 drift has surfaced, each time one layer further from where it starts: first
 the fixture bytes, then a boosted model's splits, next whatever consumes
 those. A figure is reproducible to the precision its pipeline preserves, and
 the checker now says which precision that is for each row rather than
 pretending it is the same for all of them.
+
+## 2026-09-03 — entry 14 was wrong: the boosted model moved with the scikit-learn version, not the platform
+
+**Phase:** Improvement Phase G (fresh-clone verification), correcting Phase C
+**Symptom:** the Phase G fresh clone, on the same Windows machine as the
+working repository, produced a `baselines.json` whose boosted-model figures
+were not the repository's — and were, to every quoted digit, the figures the
+WSL Ubuntu run had produced (precision 0.4525, recall 0.9599, 12,091 of the
+outage flagged). Two fresh environments on two platforms agreed with each
+other and disagreed with the one the documents were quoting.
+**First believed:** entry 14: a platform effect, the 1e-14 libm drift of
+entry 13 reaching the boosted model through histogram bin edges. It fit the
+evidence available at the time — one Linux run against one Windows run — and
+a tolerance was written into the checker on the strength of it.
+**Actually wrong:** the library version. The clone's `features.npz` is
+bit-identical to the repository's in every array (599,309 + 204,687 +
+805,066 rows, nine columns), so no drift reached the fits at all. The
+working venv had scikit-learn 1.8.0; the clone, the WSL venv and the CI
+runner resolved `scikit-learn>=1.4` to 1.9.0, and 1.9.0 fits different trees
+on identical inputs. Same machine, same features, different library: the
+clone reproduced Linux exactly. The hand and logistic rows never moved under
+either version.
+**Fix:** `scikit-learn==1.9.0` in the dev extras, the same lesson as the
+unpinned ruff in Phase B and the undeclared maturin in entry 11: a figure
+quoted from a run is reproducible only with the run's dependencies pinned.
+Section 9 is re-quoted from the pinned run, with the 1.8.0 figures kept in
+its environment note and marked superseded rather than swapped silently. The
+tolerance written for entry 14 is removed; the checker is exact for every
+baseline row again.
+**Proved by:** the repository re-run under 1.9.0 against the clone's and the
+WSL run's `baselines.json`; `make check` on all of them; CI.
+**Worth noting:** entry 14 reasoned from a correlation — Linux differed, and
+Linux was the thing that had differed all day — to a mechanism that was
+plausible and untested. The test that would have caught it was cheap: diff
+the inputs before explaining the outputs. The fresh clone did that by
+accident; it should have been done on purpose.

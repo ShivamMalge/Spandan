@@ -895,7 +895,7 @@ thresholds are log-odds):
 |---|---|---|---|---|---|---|---|---|---|---|
 | hand | six terms, hand weights | 21.99 | 0.4462 | 0.433 | **0.0824** | 0.8444 | 0.6615 | 279,151 | 9.7 | 1 in 71 |
 | logreg6 | the same six terms, learned weights | -1.498 | 0.5333 | 0.413 | **0.1130** | 0.9113 | 0.8541 | 619,275 | 10.0 | 1 in 93 |
-| gbm9 | six terms + log-amount, declined, hour | -5.528 | 0.4427 | 0.316 | **0.0814** | 0.9651 | 0.6810 | 715,730 | 11.0 | 1 in 61 |
+| gbm9 | six terms + log-amount, declined, hour | -5.432 | 0.4525 | 0.330 | **0.0844** | 0.9599 | 0.6857 | 714,187 | 10.6 | 1 in 64 |
 
 Negative controls, events flagged (false positives by construction):
 
@@ -903,7 +903,7 @@ Negative controls, events flagged (false positives by construction):
 |---|---|---|---|
 | hand | 20/17,787 (0.1%) | 1,818/18,057 (10.1%) | 9,170/18,169 (50.5%) |
 | logreg6 | 0/17,787 (0.0%) | 72/18,057 (0.4%) | 8,199/18,169 (45.1%) |
-| gbm9 | 0/17,787 (0.0%) | 16/18,057 (0.1%) | 12,644/18,169 (69.6%) |
+| gbm9 | 0/17,787 (0.0%) | 18/18,057 (0.1%) | 12,091/18,169 (66.5%) |
 
 Attack scenarios, share of events flagged:
 
@@ -911,7 +911,7 @@ Attack scenarios, share of events flagged:
 |---|---|---|---|
 | hand | 0.9619 | 0.8252 | 0.4446 |
 | logreg6 | 0.9640 | 0.9079 | 0.7105 |
-| gbm9 | 0.9830 | 0.9416 | 0.9913 |
+| gbm9 | 0.9817 | 0.9317 | 0.9904 |
 
 What the linear model learned, as a multiplier on the hand weight already
 inside each term (1.0 would mean the hand weight was right):
@@ -931,30 +931,33 @@ inside each term (1.0 would mean the hand weight was right):
 |---|---|---|---|
 | hand | 0.0824 (0.0672–0.1185) | 0.8444 (0.8189–0.9106) | 348,845 (279,151–395,007) |
 | logreg6 | 0.0845 (0.0728–0.1130) | 0.9228 (0.9113–0.9570) | 632,567 (619,275–671,464) |
-| gbm9 | 0.0699 (0.0506–0.0814) | 0.9651 (0.9418–0.9998) | 705,752 (688,571–715,730) |
+| gbm9 | 0.0696 (0.0591–0.0844) | 0.9680 (0.9599–0.9790) | 704,784 (702,460–714,187) |
 
-**Platform note.** Regenerated on ubuntu (WSL, Python 3.12, glibc) with the
-same code, every hand and logistic figure above is identical at the quoted
-precision on every seed, multipliers included. The boosted model is not: its
-seed-20260824 row becomes precision 0.4525, recall 0.9599, precision at 0.15%
-0.0844, 12,091 of the outage flagged (66.5%), and its three-seed medians
-0.0696 / 0.9680 / 704,784, and its per-seed recall range 0.9418–0.9998 becomes
-0.9599–0.9790: the best-seed recall, at 0.021 apart, is the least reproducible
-figure in this document. Histogram gradient boosting bins features by
-quantile, and the 1e-14 drift in the reference's own scores across C runtimes
-(BUILD_LOG, 2026-09-03) lands some events in different bins, which changes
-splits. Nothing it says changes: it is still the lowest of the three at the
-realistic base rate, the highest on recall, and the one that flags the outage
-hardest. The boosted row is quoted from the dated Windows run; `make check`
-requires any regeneration to land within 0.03 of it on precision, recall and
-precision at the base rate (the measured gap plus margin), 2% on net, 6% on
-the outage count, and demands the hand and logistic rows exactly.
+**Environment note.** Regenerated in three fresh environments — a second clone
+on the same Windows machine, WSL Ubuntu (glibc), and the CI runner — every
+figure above, all three rows, is identical at the quoted precision on every
+seed, multipliers included, with scikit-learn at the pinned 1.9.0. The
+features themselves are bit-identical across those environments: the 1e-14
+drift in the reference's scores across C runtimes (BUILD_LOG, 2026-09-03,
+entry 13) does not reach a single baseline figure. What did move a figure was
+the library version. The first run of this section happened to use scikit-learn
+1.8.0, under which the boosted model fit different trees on the same features:
+precision 0.4427, recall 0.9651, precision at 0.15% 0.0814, 12,644 of the
+outage flagged (69.6%), three-seed medians 0.0699 / 0.9651 / 705,752. Those
+figures stood here until 2026-09-03 and are **superseded** by the pinned run;
+BUILD_LOG entry 15 records that entry 14 attributed the difference to the C
+runtime and was wrong. Nothing the boosted row says changed between versions:
+lowest of the three at the realistic base rate, highest on recall, hardest on
+the outage. It is the one model whose result depends on its library, because
+histogram binning and greedy splits amplify implementation changes that a
+weighted sum does not see, and that is why the version is pinned rather than
+the figure tolerated. `make check` demands every row exactly.
 
 **Reading it.**
 
 1. **Precision at the realistic base rate does not move.** The linear model
    sits at a median 0.0845 against the hand weights at 0.0824, each inside the
-   other's range; the boosted model is lower at 0.0699. The 0.1130 on the base
+   other's range; the boosted model is lower at 0.0696. The 0.1130 on the base
    stream is one seed. Whatever is limiting precision at a 0.15% base rate, it
    is not the choice of weights over these terms.
 2. **Recall does move, at the same alert budget.** The linear model's worst
@@ -966,9 +969,9 @@ the outage count, and demands the hand and logistic rows exactly.
 3. **Neither learned model fixes the measured failure.** The single-merchant
    outage goes from 50.5% flagged to 45.1% under the linear model, which
    up-weights the repetition damping five-fold and still cannot separate it,
-   and to 69.6% under the boosted model, which buys its recall partly by
+   and to 66.5% under the boosted model, which buys its recall partly by
    flagging the outage harder. The issuer-wide outage, by contrast, nearly
-   vanishes (1,818 → 72 → 16 events). The single-merchant outage is separable
+   vanishes (1,818 → 72 → 18 events). The single-merchant outage is separable
    from an attack only by a signal these nine features do not carry, which is
    what §2.1a's kill-switch supplies from the trailing hour rather than the
    five-minute window.

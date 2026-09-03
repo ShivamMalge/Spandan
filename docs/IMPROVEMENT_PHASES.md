@@ -261,17 +261,20 @@ label-blind extraction, and the hand row reproducing `evaluate` field for field.
 scikit-learn is a dev extra; `spandan.detect` is asserted not to import it.
 
 **Measured.** Precision at the 0.15% base rate does not move across seeds
-(logreg6 median 0.0845 vs hand 0.0824, ranges overlapping; gbm9 0.0699). Recall
+(logreg6 median 0.0845 vs hand 0.0824, ranges overlapping; gbm9 0.0696). Recall
 does: 0.9228 vs 0.8444 median at the same alert budget, the linear model's worst
 seed above the hand weights' best; net roughly doubles. Neither learned model
-fixes the single-merchant outage (45.1% and 69.6% flagged vs 50.5%). The linear
+fixes the single-merchant outage (45.1% and 66.5% flagged vs 50.5%). The linear
 model's weights are a real criticism of the hand weights (BIN velocity and
 decline excess ×0.12, per-IP velocity sign-flipped, repetition damping ×5).
 Reported in FAILURE_MODES §9 and a README table; nothing shipped, detector
-untouched. CI: the first Linux `figures` run failed on the boosted row alone;
-regenerated under WSL, the hand and logistic rows were identical on every seed
-and the boosted model moved in the third decimal (BUILD_LOG entry 14). Its row
-is now checked within a stated tolerance; the others stay exact.
+untouched. CI: the first Linux `figures` run failed on the boosted row alone.
+First read as a platform effect (BUILD_LOG entry 14); the Phase G fresh clone
+on the same machine reproduced the Linux figures and showed the cause was the
+scikit-learn version, 1.8.0 in the working venv against 1.9.0 everywhere fresh
+(entry 15). scikit-learn is pinned to 1.9.0, the boosted row is re-quoted from
+the pinned run with the 1.8.0 figures marked superseded, and `make check` is
+exact for every row again.
 
 **Effort.** 4h. **Risk: low-medium** — the risk is spending time on the GBM;
 if it runs over, ship the logistic regression alone, which is the comparison
@@ -412,7 +415,9 @@ conditions; the five-fold weight passes two and fails the outage condition
 three-seed tables; the detector stays frozen; Part 2 does not start. The
 first run crashed in the seed matrix (a config nested inside itself) and the
 eval gate caught a wrong focus row in the default rendering; both fixed, both
-tested, `make eval` byte-identical on the final harness.
+tested, `make eval` byte-identical on the final harness. CI green at c327dd9
+(run 33744743775): all three jobs, the experiment regenerated on ubuntu and
+checked against §7.
 
 **Effort.** 3h for the experiment. **Risk: low** for Part 1 (a subclass that
 can be deleted). **Risk: high** for Part 2, which is why it has a gate and a
@@ -480,6 +485,23 @@ gh run list --limit 1                                  # CI green
 
 Then a final BUILD_LOG entry for anything Phases A–F broke and fixed, and
 submit with hours to spare. **Nothing new starts on Sep 5 after 14:00.**
+
+**Verified (Sep 3, on c327dd9, before Phase F).** Fresh clone into a new
+directory, its own venv, `make setup` from the dev extras (maturin resolved from
+the extras, not the global PATH), then the full `make all` chain: stream
+regenerated, 130 tests passed on the clone, `make eval`, `make baselines`,
+`make experiment`, `make demo`, and `make check` PASS with 431 figures across 13
+documents against the clone's own build. `cargo test --release`: 33 passed.
+`git status --porcelain` empty afterwards. The clone's `metrics.json` is identical to the working repository's, engine label aside;
+its `baselines.json` and both experiment JSONs are byte-identical to the
+repository's once the repository was re-run under the pinned scikit-learn 1.9.0
+(the clone had resolved 1.9.0 on its own, which is how the version effect of
+BUILD_LOG entry 15 came to light).
+CI green on the same commit in all three jobs (run 33744743775). The run was
+interrupted once by the tool shell dying mid-chain, not by the build; the
+remaining stages were resumed in the same clone from the first missing output,
+and the stages that had completed were not repeated. The chain is to be run
+once more after Phase F lands, before submission.
 
 ---
 

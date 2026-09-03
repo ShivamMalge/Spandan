@@ -18,8 +18,10 @@ spandan = "spandan.cli:main"
 dev = [
     "pytest>=8.0",
     # Phase C learned baselines (spandan.eval.baselines) only. Never imported by
-    # the detector, the harness, or anything the runtime path touches.
-    "scikit-learn>=1.4",
+    # the detector, the harness, or anything the runtime path touches. Pinned:
+    # the boosted model fits differently under 1.8.0 and 1.9.0 on identical
+    # inputs (BUILD_LOG, 2026-09-03, entry 15), and section 9 quotes one run.
+    "scikit-learn==1.9.0",
     # `make setup` runs `maturin develop --release` after this install; without
     # maturin here it resolves only if one happens to be on PATH globally.
     "maturin>=1.14,<2.0",

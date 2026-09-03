@@ -22,11 +22,10 @@ Six passes:
   2. DERIVED    ratios and roundings quoted in prose must follow from the data
   3. DIAGRAM    the fenced triage mermaid block equals render_mermaid()
   4. NEGATIVE   superseded figures may not survive outside history sections
-  5. BASELINES  every learned-baseline figure, and the hand row must equal the
-                harness's own seed matrix. The boosted model's row is checked
-                within a stated tolerance, not exactly: measured on ubuntu, its
-                figures move in the third decimal (FAILURE_MODES section 9,
-                platform note) while the hand and logistic rows do not move at all
+  5. BASELINES  every learned-baseline figure, exactly, and the hand row must
+                equal the harness's own seed matrix. Exact for the boosted row too:
+                its figures depend on the scikit-learn version, which is pinned
+                (FAILURE_MODES section 9, environment note; BUILD_LOG entry 15)
   6. EXPERIMENT the long-horizon experiment's figures, beside the frozen
                 detector's, from its own harness runs
 
@@ -209,48 +208,16 @@ def pass_negative(ck: Check) -> None:
 
 
 # --------------------------------------------------------------- 5. BASELINES
-#: The boosted model (HistGradientBoosting) is not platform-exact: regenerated
-#: on ubuntu it moves precision 0.4427 -> 0.4525, recall 0.9651 -> 0.9599 and
-#: the outage count 12,644 -> 12,091 while every hand and logistic figure is
-#: identical. Its row is quoted from the dated Windows run and any regeneration
-#: must land within these of it. The tolerances are stated in section 9.
-#: ratio 0.03: the largest gap measured across every quoted boosted figure was
-#: 0.021, on the best-seed recall (0.9998 Windows, 0.9790 ubuntu).
-GBM_TOLERANCE = {"ratio": 0.03, "net": 0.02, "count": 0.06, "alerts_per_day": 0.8, "one_in_n": 8}
-
-
-def _row_numbers(text: str, section: str, prefix: str) -> list[float]:
-    """Numbers in the first Markdown table row beginning with `prefix` after
-    `section` appears. Thousands separators and ranges are handled; a leading
-    minus is kept."""
-    body = text[text.index(section):]
-    for line in body.splitlines():
-        if line.startswith(prefix):
-            cells = [c.strip() for c in line.strip("|").split("|")][1:]
-            out: list[float] = []
-            for cell in cells:
-                for m in re.findall(r"-?\d[\d,]*\.?\d*", cell):
-                    out.append(float(m.replace(",", "")))
-            return out
-    return []
-
-
 def pass_baselines(ck: Check) -> None:
+    """Every row exact. The boosted model's figures depend on the scikit-learn
+    version (1.8.0 and 1.9.0 fit different trees on bit-identical features), so
+    the version is pinned in pyproject and the figures are quoted from the pinned
+    run; three fresh environments on two platforms reproduce them exactly."""
     bl, metrics = ck.source("baselines.json"), ck.source("metrics.json")
     if bl is None or metrics is None:
         return
     sm = bl["seed_matrix"]
-
-    def close(label: str, quoted: float | None, actual: float, tol: float, relative: bool) -> None:
-        ck.count += 1
-        if quoted is None:
-            ck.fails.append(f"FAILURE_MODES/README: could not find the quoted figure for {label}")
-            return
-        gap = abs(quoted - actual) / (abs(actual) or 1.0) if relative else abs(quoted - actual)
-        if gap > tol:
-            ck.fails.append(f"BASELINES {label}: quoted {quoted} vs regenerated {actual:.4f}, outside tolerance {tol}")
-
-    for name in ("hand", "logreg6"):
+    for name in ("hand", "logreg6", "gbm9"):
         row = bl["models"][name]
         for label, token in [
             (f"{name} p@base",    f"{row['precision_at_target_prevalence']:.4f}"),
@@ -273,43 +240,13 @@ def pass_baselines(ck: Check) -> None:
             ck.expect(f"{name} max {label}", ck.fm, fmt(hi), "FAILURE_MODES")
     for term, w in bl["models"]["logreg6"]["weights"].items():
         ck.expect(f"logreg6 multiplier {term}", ck.fm, f"{w:+.3f}", "FAILURE_MODES")
-
-    # The boosted row, within tolerance of the dated run it is quoted from.
-    g = bl["models"]["gbm9"]
-    t = GBM_TOLERANCE
-    main = _row_numbers(ck.fm, "## 9. Learned weights", "| gbm9 |")
-    # cells: threshold, precision, alert precision, p@base, recall, PR-AUC, net, alerts/day, 1 in N
-    pick = lambda xs, i: xs[i] if len(xs) > i else None  # noqa: E731
-    close("gbm9 precision", pick(main, 1), g["precision"], t["ratio"], False)
-    close("gbm9 p@base", pick(main, 3), g["precision_at_target_prevalence"], t["ratio"], False)
-    close("gbm9 recall", pick(main, 4), g["recall"], t["ratio"], False)
-    close("gbm9 net", pick(main, 6), g["net_rupees"], t["net"], True)
-    close("gbm9 alerts/day", pick(main, 7), g["alerts_per_day"], t["alerts_per_day"], False)
-    close("gbm9 1 in N", pick(main, 9), round(1 / g["legit_decline_rate"]), t["one_in_n"], False)
-    controls = _row_numbers(ck.fm, "Negative controls, events flagged", "| gbm9 |")
-    # cells per control: flagged, events, rate%  -> issuer_outage flagged at 3, outage_single flagged at 6
-    close("gbm9 issuer_outage flagged", pick(controls, 3), g["per_scenario"]["issuer_outage"]["flagged"], 3.0, False)
-    close("gbm9 outage_single flagged", pick(controls, 6), g["per_scenario"]["outage_single_merchant"]["flagged"], t["count"], True)
-    rows = [r for r in sm if r["model"] == "gbm9"]
-    spread_row = _row_numbers(ck.fm, "**Across three independently generated streams**", "| gbm9 |")
-    readme_row = _row_numbers(ck.readme, "**Against learned baselines on the same features**", "| gradient boosting")
-    for key, label, i, relative in (
-        ("precision_at_target_prevalence", "p@base", 0, False), ("recall", "recall", 3, False), ("net_rupees", "net", 6, True),
-    ):
-        med, lo, hi = spread(rows, key)
-        tol = t["net"] if relative else t["ratio"]
-        close(f"gbm9 median {label} (FM)", pick(spread_row, i), med, tol, relative)
-        close(f"gbm9 min {label}", pick(spread_row, i + 1), lo, tol, relative)
-        close(f"gbm9 max {label}", pick(spread_row, i + 2), hi, tol, relative)
-        close(f"gbm9 median {label} (README)", pick(readme_row, i // 3), med, tol, relative)
-
     # The control: the hand row's spread is the harness's own seed matrix.
     full = [r for r in metrics["seed_matrix"] if r["variant"] == "full"]
     ck.count += 1
     if abs(spread([r for r in sm if r["model"] == "hand"], "net_rupees")[0] - statistics.median(r["net_rupees"] for r in full)) > 0.5:
         ck.fails.append("BASELINES: the hand row's median net does not equal the harness seed matrix")
     outage = bl["models"]["logreg6"]["per_scenario"]["outage_single_merchant"]
-    boosted = g["per_scenario"]["outage_single_merchant"]
+    boosted = bl["models"]["gbm9"]["per_scenario"]["outage_single_merchant"]
     ck.derived("45% outage under logreg6", round(outage["flagged"] / outage["events"] * 100) == 45, "45%", ck.readme)
     ck.derived("two in three under gbm9", 0.60 <= boosted["flagged"] / boosted["events"] <= 0.75, "two in three", ck.readme)
 
