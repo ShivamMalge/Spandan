@@ -429,7 +429,10 @@ This is the §7 recommendation-1 signal — retry structure over a long
 horizon — placed in the routing layer instead of the scoring function. It
 does what a routing rule can do with it. What it cannot do is score with
 it: a detector that saw the retry ratio inside its own window would flag
-less rather than decline less, and that remains the unbuilt fix.
+less rather than decline less. That fix is now measured as an experiment
+(§7): 35.6% of the outage flagged at the hand weight, 18.0% at five times
+it, against 50.5% — and it fails its registered ship gate on the outage
+condition, so it stays out of the detector.
 
 ### 2.2 The retry separator is invisible at the window size chosen
 
@@ -680,6 +683,58 @@ Ordered by how much they change the credibility of the submission:
    validation under the same alerts/day ≤ 10 budget; three seeds. The
    ship gate is in IMPROVEMENT_PHASES Phase E and does not change with the
    result. The result goes here, whatever it is.
+
+   **Measured, 2026-09-03, on the stream every other figure comes from**
+   (`make experiment`; thresholds chosen on validation under the same budget;
+   the frozen rows inside each run reproduce `make eval` exactly):
+
+   | detector | outage_single_merchant flagged | precision @ 0.15% | precision | recall | PR-AUC | legitimate declined | threshold | alerts/day (test) |
+   |---|---|---|---|---|---|---|---|---|
+   | frozen (5-minute repetition, weight 1.2) | 9,170/18,169 (**50.5%**) | **0.0824** | 0.4462 | 0.8444 | 0.6615 | 1.41%, 1 in 71 | 21.99 | 9.7 |
+   | long_horizon (60-minute repetition, weight 1.2) | 6,463/18,169 (**35.6%**) | **0.1071** | 0.5183 | 0.8413 | 0.6780 | 1.05%, 1 in 95 | 21.80 | 10.1 |
+   | long_horizon_x5 (60-minute repetition, weight 6.0) | 3,268/18,169 (**18.0%**) | **0.1658** | 0.6406 | 0.7969 | 0.6983 | 0.60%, 1 in 166 | 21.59 | 10.2 |
+
+   Per scenario, share of events flagged:
+
+   | detector | burst | rotating | slow_low | flash_sale | issuer_outage |
+   |---|---|---|---|---|---|
+   | frozen | 0.9619 | 0.8252 | 0.4446 | 0.0011 | 0.1007 |
+   | long_horizon | 0.9619 | 0.8183 | 0.4455 | 0.0012 | 0.0920 |
+   | long_horizon_x5 | 0.9538 | 0.7385 | 0.4028 | 0.0012 | 0.0690 |
+
+   Across three independently generated streams (median, min–max):
+
+   | detector | precision | recall | net ₹ |
+   |---|---|---|---|
+   | frozen | 0.4462 (0.4117–0.5972) | 0.8444 (0.8189–0.9106) | 348,845 (279,151–395,007) |
+   | long_horizon | 0.5183 (0.4752–0.6509) | 0.8413 (0.8215–0.9089) | 369,094 (297,371–396,844) |
+   | long_horizon_x5 | 0.6406 (0.6024–0.7324) | 0.8368 (0.7969–0.8786) | 406,857 (330,854–408,988) |
+
+   **What it says.** The diagnosis holds: one term, fed from a window long
+   enough to see the retry structure, removes two-thirds of the outage false
+   positives (50.5% → 18.0%) and doubles precision at the realistic base rate
+   (0.0824 → 0.1658) at the same alert budget, without touching the other five
+   terms. At the hand weight the window alone is worth 15 points of outage and
+   a third more precision at the base rate, with recall unchanged. The
+   five-fold weight, which the section 9 linear model had learned, buys the
+   rest of the outage reduction with recall: 0.8444 → 0.7969, 4.7 points, most
+   of it on the rotating attack (0.8252 → 0.7385), whose card rotation is the
+   attack that most resembles retrying. The issuer-wide outage moves the same
+   way (10.1% → 6.9%); the flash sale is untouched.
+
+   **Against the gate registered in IMPROVEMENT_PHASES Phase E.** Ship only if
+   the outage falls below 15%, precision at the base rate rises above 0.15,
+   the legitimate-decline rate falls below 0.7%, and it is before 10:00 on
+   Sep 5. The hand weight fails all three numeric conditions. The five-fold
+   weight passes two (0.1658 > 0.15; 0.60% < 0.7%) and fails the outage
+   condition, 18.0% against 15%. **Not shipped.** The detector stays frozen and
+   every headline figure in this repository is the frozen one. A weight
+   between 1.2 and 6.0, chosen on validation, might clear 15% at a smaller
+   recall cost; it was not tried, because the two weights were the ones
+   registered and a third chosen after reading these tables would be the
+   selection-on-test this document exists to avoid. That search, the Rust
+   port, and parity regeneration are the next project, and this table is what
+   it starts from.
 2. **Model alert fatigue, or stop reporting net rupees as the deciding metric**
    (§3.1). Linear review cost is why the cost model cannot separate the variants.
 3. **Add an event-level flag-rate constraint** alongside the alerts/day budget,
@@ -877,6 +932,23 @@ inside each term (1.0 would mean the hand weight was right):
 | hand | 0.0824 (0.0672–0.1185) | 0.8444 (0.8189–0.9106) | 348,845 (279,151–395,007) |
 | logreg6 | 0.0845 (0.0728–0.1130) | 0.9228 (0.9113–0.9570) | 632,567 (619,275–671,464) |
 | gbm9 | 0.0699 (0.0506–0.0814) | 0.9651 (0.9418–0.9998) | 705,752 (688,571–715,730) |
+
+**Platform note.** Regenerated on ubuntu (WSL, Python 3.12, glibc) with the
+same code, every hand and logistic figure above is identical at the quoted
+precision on every seed, multipliers included. The boosted model is not: its
+seed-20260824 row becomes precision 0.4525, recall 0.9599, precision at 0.15%
+0.0844, 12,091 of the outage flagged (66.5%), and its three-seed medians
+0.0696 / 0.9680 / 704,784, and its per-seed recall range 0.9418–0.9998 becomes
+0.9599–0.9790: the best-seed recall, at 0.021 apart, is the least reproducible
+figure in this document. Histogram gradient boosting bins features by
+quantile, and the 1e-14 drift in the reference's own scores across C runtimes
+(BUILD_LOG, 2026-09-03) lands some events in different bins, which changes
+splits. Nothing it says changes: it is still the lowest of the three at the
+realistic base rate, the highest on recall, and the one that flags the outage
+hardest. The boosted row is quoted from the dated Windows run; `make check`
+requires any regeneration to land within 0.03 of it on precision, recall and
+precision at the base rate (the measured gap plus margin), 2% on net, 6% on
+the outage count, and demands the hand and logistic rows exactly.
 
 **Reading it.**
 

@@ -757,10 +757,11 @@ def main(argv: list[str] | None = None) -> int:
     episode_windows = manifest["episode_windows"]
 
     model = CostModel.load()
-    config = DetectorConfig()
+    base_config = DetectorConfig()
+    config = base_config
     variants = VARIANTS
     if args.variant:
-        config = variant_config(args.variant, config)
+        config = variant_config(args.variant, base_config)
         variants = ("full", args.variant)
     split = load_split(data_dir)
 
@@ -791,10 +792,16 @@ def main(argv: list[str] | None = None) -> int:
         )
         render_triage(triage)
 
-    rows = run_seed_matrix(args.seeds, manifest["seed"], config, model, variants)
+    # The matrix applies each variant to the BASE config itself, so the frozen
+    # rows are the frozen detector and the variant row is built once, not nested.
+    rows = run_seed_matrix(args.seeds, manifest["seed"], base_config, model, variants)
     render_ablation_matrix(rows, args.seeds, variants)
-    render_multiseed(rows, variants[-1])
-    render_verdict(result, rows, model, variants[-1])
+    # The row the spread and the verdict describe: the experiment in a variant
+    # run, the frozen detector otherwise. (`variants[-1]` here was the default
+    # run naming its last ablation; the make eval byte-identity gate caught it.)
+    focus = args.variant or "full"
+    render_multiseed(rows, focus)
+    render_verdict(result, rows, model, focus)
 
     if args.json_out:
         summary = summarise(result, rows)
@@ -819,6 +826,8 @@ EXPERIMENTS = {"long_horizon": 1.2, "long_horizon_x5": 6.0}
 
 
 def variant_config(name: str, config: DetectorConfig) -> DetectorConfig:
+    if hasattr(config, "base"):  # an experiment config: variants apply to its base
+        config = config.base
     if name == "full":
         return config
     if name == "drop-EWMA":

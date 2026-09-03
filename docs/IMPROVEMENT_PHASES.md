@@ -268,7 +268,10 @@ fixes the single-merchant outage (45.1% and 69.6% flagged vs 50.5%). The linear
 model's weights are a real criticism of the hand weights (BIN velocity and
 decline excess ×0.12, per-IP velocity sign-flipped, repetition damping ×5).
 Reported in FAILURE_MODES §9 and a README table; nothing shipped, detector
-untouched.
+untouched. CI: the first Linux `figures` run failed on the boosted row alone;
+regenerated under WSL, the hand and logistic rows were identical on every seed
+and the boosted model moved in the third decimal (BUILD_LOG entry 14). Its row
+is now checked within a stated tolerance; the others stay exact.
 
 **Effort.** 4h. **Risk: low-medium** — the risk is spending time on the GBM;
 if it runs over, ship the logistic regression alone, which is the comparison
@@ -398,7 +401,18 @@ feeding the `repetition` term only; weights 1.2 (hand) and 6.0 (five times, the
 section 9 linear model's warm-up multiplier for this term); thresholds on
 validation under the same budget; three seeds; run as `--variant` through the
 full harness beside the frozen detector (`make experiment`). The four gate
-conditions above are unchanged. Result recorded below once measured.
+conditions above are unchanged.
+
+**Measured (Sep 3).** Outage flagged 50.5% → 35.6% at the hand weight, → 18.0%
+at five times it; precision at the 0.15% base rate 0.0824 → 0.1071 → 0.1658;
+legitimate declines 1 in 71 → 1 in 95 → 1 in 166; recall 0.8444 → 0.8413 →
+0.7969. **Gate: do not ship.** The hand weight fails all three numeric
+conditions; the five-fold weight passes two and fails the outage condition
+(18.0% vs 15%). Reported in FAILURE_MODES §7 with the per-scenario and
+three-seed tables; the detector stays frozen; Part 2 does not start. The
+first run crashed in the seed matrix (a config nested inside itself) and the
+eval gate caught a wrong focus row in the default rendering; both fixed, both
+tested, `make eval` byte-identical on the final harness.
 
 **Effort.** 3h for the experiment. **Risk: low** for Part 1 (a subclass that
 can be deleted). **Risk: high** for Part 2, which is why it has a gate and a

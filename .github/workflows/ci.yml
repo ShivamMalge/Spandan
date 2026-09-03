@@ -120,9 +120,15 @@ jobs:
       - name: make check
         env:
           PYTHONIOENCODING: utf-8
+        # The checker's failure lines are re-emitted as annotations, which the
+        # API exposes without admin rights; job logs are not.
         run: |
           . .venv/bin/activate
-          python scripts/check_figures.py --skip experiment
+          set -o pipefail
+          if ! python scripts/check_figures.py --skip experiment 2>&1 | tee check.log; then
+            grep -E "^  - " check.log | sed "s/^  - /::error::/"
+            exit 1
+          fi
 
   experiment:
     runs-on: ubuntu-latest
@@ -159,4 +165,8 @@ jobs:
           PYTHONIOENCODING: utf-8
         run: |
           . .venv/bin/activate
-          python scripts/check_figures.py --only experiment
+          set -o pipefail
+          if ! python scripts/check_figures.py --only experiment 2>&1 | tee check.log; then
+            grep -E "^  - " check.log | sed "s/^  - /::error::/"
+            exit 1
+          fi

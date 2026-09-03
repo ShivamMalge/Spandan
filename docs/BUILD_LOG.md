@@ -450,3 +450,37 @@ fourteenth decimal. Every documented figure survived the move: the CI
 `make check` passed 31 of 31 — the figures are quoted at four decimals and the
 drift lives at fourteen. That is the gap between a number that reproduces and
 a byte that does.
+
+## 2026-09-03 — the CI figures job went red on the learned baselines; only the boosted model had moved
+
+**Phase:** Improvement Phase C (learned baselines)
+**Symptom:** the first push with `make baselines` in the CI figures job failed
+at `make check` on ubuntu, after the same check passed on Windows with 96
+figures. The job log was unreadable through the API, as before.
+**First believed:** scikit-learn nondeterminism — gradient boosting with
+OpenMP summing histograms in a thread-dependent order, so a 4-core runner and
+a 16-core laptop would fit different trees. Tested by refitting on the laptop
+with two threads: the boosted row was bit-identical, and the logistic
+threshold moved at the twelfth decimal only. Not that.
+**Actually wrong:** a platform effect, the same one entry 13 found and one
+step downstream of it. Regenerating the stream, the features and the fits
+under WSL Ubuntu: every hand and logistic figure identical at the quoted
+precision on all three seeds, multipliers included; the boosted model's
+seed-zero precision 0.4427 → 0.4525, recall 0.9651 → 0.9599, outage flagged
+12,644 → 12,091. Histogram gradient boosting bins by quantile, so the 1e-14
+drift in the reference's scores across C runtimes moves a few events across
+bin edges and changes splits. The linear model, which is a weighted sum,
+does not care.
+**Fix:** the boosted row is quoted from the dated Windows run, section 9 says
+so and states the tolerance, and the checker enforces it: within 0.03 on the
+ratios (the largest gap measured was 0.021, on the best-seed recall), 2% on
+net, 6% on the outage count, while the hand and logistic rows stay exact. The README's "70%" for the boosted model became "two in three",
+which is true on both platforms. Nothing about the finding changed.
+**Proved by:** the WSL comparison above (`baselines_linux.json` against
+`data/baselines.json`); the checker passing on both.
+**Worth noting:** this is the third time in a day the same fourteenth-decimal
+drift has surfaced, each time one layer further from where it starts: first
+the fixture bytes, then a boosted model's splits, next whatever consumes
+those. A figure is reproducible to the precision its pipeline preserves, and
+the checker now says which precision that is for each row rather than
+pretending it is the same for all of them.

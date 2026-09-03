@@ -86,3 +86,25 @@ def test_reference_module_is_not_imported_differently_by_the_experiment():
     overrides = {k for k, v in LongHorizonDetector.__dict__.items() if callable(v) and not k.startswith("__")}
     assert overrides == {"reset", "_advance", "_score"}
     assert "__init__" in LongHorizonDetector.__dict__
+
+
+def test_variant_config_never_nests_and_full_means_frozen(events):
+    """The harness wiring: applying a variant to a config that is already the
+    experiment's must not nest one inside the other (the crash the first
+    experiment run hit), and "full" applied to an experiment config must be
+    the frozen detector, so a variant run's frozen rows are really frozen."""
+    from spandan.detect.experimental import LongHorizonConfig
+    from spandan.eval.harness import variant_config
+
+    once = variant_config("long_horizon", DetectorConfig())
+    twice = variant_config("long_horizon", once)
+    assert isinstance(twice, LongHorizonConfig) and isinstance(twice.base, DetectorConfig)
+    assert twice == once
+
+    frozen_again = variant_config("full", once)
+    assert frozen_again == DetectorConfig()
+    from spandan.eval.harness import _detector
+
+    assert type(_detector(frozen_again)).__name__ == "ReferenceDetector"
+    assert type(_detector(once)) is LongHorizonDetector
+    assert np.array_equal(_detector(frozen_again).score_batch(events[:2000]), ReferenceDetector().score_batch(events[:2000]))

@@ -13,8 +13,9 @@ would ship is alert-only at budget 2: 2.1 alerts a day, 35 of 60 attack episodes
 surfaced, 1 in 271 flagged. The one measured failure is a single-merchant issuer
 outage, 50.5% of which is flagged as card testing; a kill-switch in the
 post-detection graph recovers 31% of those false declines (1 in 71 → 1 in 102)
-without touching a score, and the detector-level fix stays unbuilt. Every figure
-here reproduces from `make eval` on a fresh clone.
+without touching a score. The detector-level fix, measured as an experiment,
+cuts that to 18.0% but fails its own ship gate and stays out of the detector.
+Every figure here reproduces from `make eval` on a fresh clone.
 
 ## The problem
 
@@ -50,10 +51,10 @@ strictly defense-only. Where each clause is met, and what proves it:
 Four evaluation criteria are reported for this buildathon by secondary
 coverage — not on the official page, so treated as reported. Where each lives:
 **Problem taste** — the loss class and the rupee model, above. **Build quality**
-— 129 Python and 33 Rust tests, two engines bit-exact over 1.6M events,
+— 130 Python and 33 Rust tests, two engines bit-exact over 1.6M events,
 reproduction from a fresh clone. **AI judgment** — the language model is
 structurally unable to reach a number and its notes are validated; see *Where
-AI is*. **Failure recovery** — [BUILD_LOG.md](docs/BUILD_LOG.md): thirteen entries,
+AI is*. **Failure recovery** — [BUILD_LOG.md](docs/BUILD_LOG.md): fourteen entries,
 each with the wrong diagnosis written before the right one;
 `spandan replay --cold-start` demonstrates a failure mode live; and the triage
 graph's kill-switch is a graceful degradation aimed at the measured worst
@@ -101,8 +102,9 @@ alert budget, same pipeline; [FAILURE_MODES.md](docs/FAILURE_MODES.md) §9):
 
 Learning the weights does not move precision at the realistic base rate. It buys
 recall at the same alert budget, and neither learned model fixes the single-merchant
-outage: the linear one still flags 45% of it and the boosted one 70%, against
-50.5%. The learned models are reported, not shipped; `make baselines` reproduces them.
+outage: the linear one still flags 45% of it and the boosted one two in three,
+against 50.5%. The learned models are reported, not shipped; `make baselines`
+reproduces them, the boosted row within a stated tolerance across platforms.
 
 **Two results, and they are separate claims.** It detects every attack episode, and
 fast — 60/60, p90 of 32 events on burst episodes of 190–300. And at a realistic base
@@ -136,7 +138,7 @@ make check                                          # every documented figure ag
 ```
 
 `make eval ENGINE=rust` runs the same evaluation through the Rust core and produces
-a byte-identical metrics JSON. `make test` runs 129 Python tests (~13 min, several
+a byte-identical metrics JSON. `make test` runs 130 Python tests (~13 min, several
 build streams and run full evaluations) and `cargo test` runs 33 Rust tests.
 `make bench` reproduces [docs/BENCH.md](docs/BENCH.md). `make all` chains data,
 test, eval, demo and check. CI runs the test suite in one job and `make data`,
@@ -424,8 +426,11 @@ but the retries are spread across an hour while the window is 5 minutes, so any
 single window sees 1.13 in-window attempts per card for an outage against 1.22 for a
 burst. The damping term points the wrong way. That failure, not the alert queue, is
 what makes the 1-in-71 decline rate irreducible at this window size. The fix — a
-second, long-horizon window on the BIN axis — is diagnosed and unbuilt; the detector
-was frozen as the parity spec for the Rust port.
+second, long-horizon window on the BIN axis — is built as an experiment and measured
+([FAILURE_MODES.md](docs/FAILURE_MODES.md) §7): 50.5% → 35.6% of the outage flagged
+at the hand weight, 18.0% at five times it, the latter at a cost of 4.7 points of
+recall. It fails the ship gate registered before the measurement, on the outage
+condition (15%), so the detector stays frozen as the parity spec for the Rust port.
 
 Also unaddressed:
 
@@ -536,7 +541,7 @@ python/spandan/detect/  Detector interface, Python reference (the spec), Rust ad
 python/spandan/eval/  Temporal loader, metrics, rupee cost model, evaluation harness, learned baselines, benchmarks
 python/spandan/triage/  The post-detection graph: nodes, routing table, audit trail, kill-switch
 python/spandan/llm/   Bounded explanation layer, grounding validator, cassettes, comparison target
-tests/                129 tests: generator, detector, cross-engine parity, evaluation, triage graph, LLM boundary
+tests/                130 tests: generator, detector, cross-engine parity, evaluation, triage graph, LLM boundary
 docs/                 ARCHITECTURE, FAILURE_MODES, BENCH, BUILD_LOG, PHASES, AUDIT, agents (house rules)
 scripts/              check_figures.py - every documented figure against the build (make check)
 ```
