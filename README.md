@@ -50,7 +50,7 @@ strictly defense-only. Where each clause is met, and what proves it:
 Four evaluation criteria are reported for this buildathon by secondary
 coverage — not on the official page, so treated as reported. Where each lives:
 **Problem taste** — the loss class and the rupee model, above. **Build quality**
-— 125 Python and 33 Rust tests, two engines bit-exact over 1.6M events,
+— 129 Python and 33 Rust tests, two engines bit-exact over 1.6M events,
 reproduction from a fresh clone. **AI judgment** — the language model is
 structurally unable to reach a number and its notes are validated; see *Where
 AI is*. **Failure recovery** — [BUILD_LOG.md](docs/BUILD_LOG.md): thirteen entries,
@@ -136,7 +136,7 @@ make check                                          # every documented figure ag
 ```
 
 `make eval ENGINE=rust` runs the same evaluation through the Rust core and produces
-a byte-identical metrics JSON. `make test` runs 125 Python tests (~13 min, several
+a byte-identical metrics JSON. `make test` runs 129 Python tests (~13 min, several
 build streams and run full evaluations) and `cargo test` runs 33 Rust tests.
 `make bench` reproduces [docs/BENCH.md](docs/BENCH.md). `make all` chains data,
 test, eval, demo and check. CI runs the test suite in one job and `make data`,
@@ -536,7 +536,7 @@ python/spandan/detect/  Detector interface, Python reference (the spec), Rust ad
 python/spandan/eval/  Temporal loader, metrics, rupee cost model, evaluation harness, learned baselines, benchmarks
 python/spandan/triage/  The post-detection graph: nodes, routing table, audit trail, kill-switch
 python/spandan/llm/   Bounded explanation layer, grounding validator, cassettes, comparison target
-tests/                125 tests: generator, detector, cross-engine parity, evaluation, triage graph, LLM boundary
+tests/                129 tests: generator, detector, cross-engine parity, evaluation, triage graph, LLM boundary
 docs/                 ARCHITECTURE, FAILURE_MODES, BENCH, BUILD_LOG, PHASES, AUDIT, agents (house rules)
 scripts/              check_figures.py - every documented figure against the build (make check)
 ```

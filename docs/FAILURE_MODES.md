@@ -668,6 +668,18 @@ Ordered by how much they change the credibility of the submission:
    1 in 102 without touching a score. That is what the signal can do as a
    routing rule. The detector-level fix, which would stop the flags rather
    than the declines, is still unbuilt.
+
+   **Registered before measurement, 2026-09-03 (Phase E part 1).** The fix is
+   built as an experiment, `spandan.detect.experimental.LongHorizonDetector`,
+   a subclass that leaves `reference.py` and the Rust core untouched and is
+   reported, not shipped. Parameters fixed before any run on the test
+   window: a 60-minute window on the BIN axis; it feeds the `repetition`
+   term and nothing else; two weights, 1.2 (the hand weight on the
+   five-minute term) and 6.0 (five times, the multiplier the section 9 linear
+   model learned for this term on the warm-up window); thresholds chosen on
+   validation under the same alerts/day ≤ 10 budget; three seeds. The
+   ship gate is in IMPROVEMENT_PHASES Phase E and does not change with the
+   result. The result goes here, whatever it is.
 2. **Model alert fatigue, or stop reporting net rupees as the deciding metric**
    (§3.1). Linear review cost is why the cost model cannot separate the variants.
 3. **Add an event-level flag-rate constraint** alongside the alerts/day budget,

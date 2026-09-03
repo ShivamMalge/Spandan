@@ -392,6 +392,14 @@ pytest tests/test_experimental.py -v
   #   test_long_horizon_scores_match_reference_on_first_five_minutes
 ```
 
+**Registered (Sep 3), before any run on the test window.**
+`spandan.detect.experimental.LongHorizonDetector`: a 60-minute BIN-axis window
+feeding the `repetition` term only; weights 1.2 (hand) and 6.0 (five times, the
+section 9 linear model's warm-up multiplier for this term); thresholds on
+validation under the same budget; three seeds; run as `--variant` through the
+full harness beside the frozen detector (`make experiment`). The four gate
+conditions above are unchanged. Result recorded below once measured.
+
 **Effort.** 3h for the experiment. **Risk: low** for Part 1 (a subclass that
 can be deleted). **Risk: high** for Part 2, which is why it has a gate and a
 clock. Gains: axis 2 → 6 from Part 1 alone; → 7 if Part 2 ships.

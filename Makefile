@@ -5,7 +5,7 @@
 # Recipes are deliberately one command per line with no shell operators, so they
 # behave identically under cmd.exe, PowerShell and bash.
 
-.PHONY: setup test data eval baselines bench demo check all
+.PHONY: setup test data eval baselines experiment bench demo check all
 
 PY := python
 SEEDS ?= 3
@@ -32,6 +32,13 @@ baselines:
 	$(PY) -m spandan.eval.features --data data --out data/features.npz
 	$(PY) -m spandan.eval.baselines --data data --seeds $(SEEDS) --features data/features.npz --json-out data/baselines.json
 
+# Phase E part 1: the diagnosed fix as a subclass, measured through the full
+# harness beside the frozen detector. Two registered weights. Reported, not
+# shipped; the default `make eval` never runs it.
+experiment:
+	$(PY) -m spandan.eval.harness --data data --seeds $(SEEDS) --variant long_horizon --triage-mode off --json-out data/experiment_long_horizon.json
+	$(PY) -m spandan.eval.harness --data data --seeds $(SEEDS) --variant long_horizon_x5 --triage-mode off --json-out data/experiment_long_horizon_x5.json
+
 demo:
 	$(PY) -m spandan.cli replay --data data --limit 20000
 
@@ -46,4 +53,4 @@ check:
 # Everything deterministic, in dependency order. bench is separate on purpose:
 # its numbers are machine-dependent by nature, while everything `all` produces
 # must match the README exactly on any machine.
-all: data test eval baselines demo check
+all: data test eval baselines experiment demo check

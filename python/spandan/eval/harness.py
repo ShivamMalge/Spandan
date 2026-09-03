@@ -70,8 +70,19 @@ def rupees(paise: float) -> str:
 ACTIVE_ENGINE = "python"
 
 
+def _detector(config):
+    """The engine for a config. A `LongHorizonConfig` (Phase E, the experiment
+    that is reported and not shipped) builds the experiment on the Python
+    reference; a `DetectorConfig` builds the active engine as before."""
+    from ..detect.experimental import LongHorizonConfig, LongHorizonDetector
+
+    if isinstance(config, LongHorizonConfig):
+        return LongHorizonDetector(config)
+    return make_detector(ACTIVE_ENGINE, config)
+
+
 def score_stream(events: list[Event], config: DetectorConfig) -> np.ndarray:
-    return make_detector(ACTIVE_ENGINE, config).score_batch(events)
+    return _detector(config).score_batch(events)
 
 
 def score_with_warmup(
@@ -83,7 +94,7 @@ def score_with_warmup(
     every entity's baseline would be empty for the first stretch of the window
     and the scores would be an artifact of that rather than of the traffic.
     """
-    detector = make_detector(ACTIVE_ENGINE, config)
+    detector = _detector(config)
     detector.score_batch(warmup)
     return detector.score_batch(target)
 
@@ -101,7 +112,7 @@ def score_split_once(split: Split, config: DetectorConfig) -> tuple[np.ndarray, 
     than assuming it - this is the kind of optimisation that is easy to get
     subtly wrong and impossible to notice afterwards.
     """
-    detector = make_detector(ACTIVE_ENGINE, config)
+    detector = _detector(config)
     detector.score_batch(split.train_warmup)
     validation_scores = detector.score_batch(split.validation)
     test_scores = detector.score_batch(split.test)
@@ -725,6 +736,12 @@ def main(argv: list[str] | None = None) -> int:
         help="which detector core scores the stream; the numbers must not depend on it",
     )
     parser.add_argument(
+        "--variant",
+        choices=tuple(EXPERIMENTS),
+        default=None,
+        help="Phase E experiment: score with the long-horizon subclass instead of the frozen detector",
+    )
+    parser.add_argument(
         "--triage-mode",
         choices=("inline", "alert_only", "off"),
         default="inline",
@@ -741,9 +758,15 @@ def main(argv: list[str] | None = None) -> int:
 
     model = CostModel.load()
     config = DetectorConfig()
+    variants = VARIANTS
+    if args.variant:
+        config = variant_config(args.variant, config)
+        variants = ("full", args.variant)
     split = load_split(data_dir)
 
     print(f"engine        {ACTIVE_ENGINE}")
+    if args.variant:
+        print(f"variant       {args.variant}  (Phase E experiment; reported, not shipped)")
     print(f"data          {data_dir.resolve()}")
     print(f"seed          {manifest['seed']}")
     print(f"config hash   {manifest['config_hash'][:16]}")
@@ -756,6 +779,9 @@ def main(argv: list[str] | None = None) -> int:
     render_sweep(result, model)
 
     triage = None
+    if args.variant and args.triage_mode != "off":
+        print("triage pass skipped: the triage graph is measured on the frozen detector only")
+        args.triage_mode = "off"
     if args.triage_mode != "off":
         from .triage_report import AUDIT_FILENAME, render_triage, run_triage
 
@@ -765,13 +791,15 @@ def main(argv: list[str] | None = None) -> int:
         )
         render_triage(triage)
 
-    rows = run_seed_matrix(args.seeds, manifest["seed"], config, model)
-    render_ablation_matrix(rows, args.seeds)
-    render_multiseed(rows)
-    render_verdict(result, rows, model)
+    rows = run_seed_matrix(args.seeds, manifest["seed"], config, model, variants)
+    render_ablation_matrix(rows, args.seeds, variants)
+    render_multiseed(rows, variants[-1])
+    render_verdict(result, rows, model, variants[-1])
 
     if args.json_out:
         summary = summarise(result, rows)
+        if args.variant:
+            summary["variant"] = args.variant
         if triage is not None:
             from .triage_report import summarise_triage
 
@@ -784,6 +812,11 @@ def main(argv: list[str] | None = None) -> int:
 
 VARIANTS = ("full", "drop-EWMA", "drop-per-IP")
 
+#: Phase E experiments, run only with `--variant`. Name -> weight on the
+#: long-horizon repetition term; registered in FAILURE_MODES section 7 before
+#: measurement. Never part of the default run.
+EXPERIMENTS = {"long_horizon": 1.2, "long_horizon_x5": 6.0}
+
 
 def variant_config(name: str, config: DetectorConfig) -> DetectorConfig:
     if name == "full":
@@ -792,11 +825,19 @@ def variant_config(name: str, config: DetectorConfig) -> DetectorConfig:
         return replace(config, use_ewma=False)
     if name == "drop-per-IP":
         return replace(config, use_per_ip=False)
+    if name in EXPERIMENTS:
+        from ..detect.experimental import LongHorizonConfig
+
+        return LongHorizonConfig(base=config, w_repetition_damping=EXPERIMENTS[name])
     raise ValueError(f"unknown variant {name}")
 
 
 def run_seed_matrix(
-    seed_count: int, base_seed: int, config: DetectorConfig, model: CostModel
+    seed_count: int,
+    base_seed: int,
+    config: DetectorConfig,
+    model: CostModel,
+    variants: tuple[str, ...] = VARIANTS,
 ) -> list[dict]:
     """Every variant on every seed.
 
@@ -820,7 +861,7 @@ def run_seed_matrix(
             manifest = build(default_config(seed=seed), tmp)
             split = load_split(tmp)
             windows = manifest["episode_windows"]
-            for name in VARIANTS:
+            for name in variants:
                 result = evaluate(split, variant_config(name, config), model, windows)
                 confusion = result["confusion"]
                 rows.append(
@@ -844,7 +885,7 @@ def _spread(values: list[float]) -> tuple[float, float, float]:
     return min(values), float(np.median(values)), max(values)
 
 
-def render_ablation_matrix(rows: list[dict], seed_count: int) -> None:
+def render_ablation_matrix(rows: list[dict], seed_count: int, variants: tuple[str, ...] = VARIANTS) -> None:
     print()
     print("=" * 78)
     print("ABLATIONS, ACROSS SEEDS")
@@ -854,7 +895,7 @@ def render_ablation_matrix(rows: list[dict], seed_count: int) -> None:
     print()
     print(f"median across {seed_count} streams, with [min, max]:")
     print(f"{'variant':<14}{'precision':>22}{'recall':>22}{'net rupees':>24}")
-    for name in VARIANTS:
+    for name in variants:
         subset = [row for row in rows if row["variant"] == name]
         if not subset:
             continue
@@ -872,7 +913,7 @@ def render_ablation_matrix(rows: list[dict], seed_count: int) -> None:
     print()
     print("does any ablation gap survive the spread? paired per seed, which is the")
     print("only comparison that controls for the stream:")
-    for name in VARIANTS[1:]:
+    for name in variants[1:]:
         variant = [r for r in rows if r["variant"] == name]
         deltas = [
             v["net_rupees"] - f["net_rupees"]
@@ -890,9 +931,9 @@ def render_ablation_matrix(rows: list[dict], seed_count: int) -> None:
         )
 
 
-def render_multiseed(rows: list[dict]) -> None:
+def render_multiseed(rows: list[dict], variant: str = "full") -> None:
     """Stability of the shipped configuration, across streams."""
-    full = [row for row in rows if row["variant"] == "full"]
+    full = [row for row in rows if row["variant"] == variant]
     print()
     print("=" * 78)
     print("MULTI-SEED STABILITY (full configuration)")
@@ -932,9 +973,9 @@ def render_multiseed(rows: list[dict]) -> None:
     print(f"and the data, not the operating point. Thresholds ranged {th_lo:.2f} to {th_hi:.2f}.")
 
 
-def render_verdict(result: dict, rows: list[dict], model: CostModel) -> None:
+def render_verdict(result: dict, rows: list[dict], model: CostModel, variant: str = "full") -> None:
     """The honest summary, after the spread is known."""
-    full = [row for row in rows if row["variant"] == "full"]
+    full = [row for row in rows if row["variant"] == variant]
     print()
     print("=" * 78)
     print("VERDICT")

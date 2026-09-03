@@ -14,6 +14,9 @@ name: ci
 #              a document asserts no longer reproduces. This is the README's
 #              "reproduces from make eval on a fresh clone" as a machine check
 #              rather than a sentence.
+#   experiment - `make data`, `make experiment`, then the checker's EXPERIMENT
+#              pass alone: the Phase E long-horizon figures in FAILURE_MODES
+#              section 7, regenerated on Linux.
 
 on:
   push:
@@ -119,4 +122,41 @@ jobs:
           PYTHONIOENCODING: utf-8
         run: |
           . .venv/bin/activate
-          make check
+          python scripts/check_figures.py --skip experiment
+
+  experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: make setup
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          make setup
+
+      - name: make data
+        run: |
+          . .venv/bin/activate
+          make data
+
+      - name: make experiment
+        env:
+          PYTHONIOENCODING: utf-8
+        run: |
+          . .venv/bin/activate
+          make experiment
+
+      - name: check the experiment figures
+        env:
+          PYTHONIOENCODING: utf-8
+        run: |
+          . .venv/bin/activate
+          python scripts/check_figures.py --only experiment

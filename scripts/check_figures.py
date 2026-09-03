@@ -14,14 +14,22 @@ Sources of truth, in order of authority:
                         exactly what the declaration renders
   data/baselines.json - written by `make baselines`; the learned-baseline rows
                         in README and FAILURE_MODES section 9
+  data/experiment_long_horizon*.json - written by `make experiment`; the Phase E
+                        long-horizon figures in FAILURE_MODES section 7
 
-Four passes:
-  1. POSITIVE  every asserted figure must equal the corresponding value
-  2. DERIVED   ratios and roundings quoted in prose must follow from the data
-  3. DIAGRAM   the fenced triage mermaid block equals render_mermaid()
-  4. NEGATIVE  superseded figures may not survive outside history sections
-  5. BASELINES every learned-baseline figure, and the hand row must equal the
-               harness's own seed matrix
+Six passes:
+  1. POSITIVE   every asserted figure must equal the corresponding value
+  2. DERIVED    ratios and roundings quoted in prose must follow from the data
+  3. DIAGRAM    the fenced triage mermaid block equals render_mermaid()
+  4. NEGATIVE   superseded figures may not survive outside history sections
+  5. BASELINES  every learned-baseline figure, and the hand row must equal the
+                harness's own seed matrix
+  6. EXPERIMENT the long-horizon experiment's figures, beside the frozen
+                detector's, from its own harness runs
+
+`--only NAME` runs one pass; `--skip NAME` drops one. The CI figures job skips
+the experiment (a separate job builds it) and the experiment job runs only it.
+A missing source file fails the pass that needs it; nothing is silently skipped.
 
 What it cannot check, stated so nobody over-reads a PASS: time-to-detection
 and the budget frontier are not in metrics.json, so "60/60 episodes" and the
@@ -31,6 +39,7 @@ for consistency between README and BENCH.md, not reproduced.
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import statistics
@@ -41,33 +50,59 @@ ROOT = Path(__file__).resolve().parents[1]
 DOCS = [ROOT / "README.md", *sorted((ROOT / "docs").glob("*.md")),
         ROOT / "python" / "spandan" / "gen" / "ASSUMPTIONS.md",
         ROOT / "python" / "spandan" / "llm" / "TARGET.md"]
+PASSES = ("positive", "derived", "diagram", "negative", "baselines", "experiment")
 
 
-def load() -> tuple[dict, dict, str, dict[Path, str]]:
-    metrics = json.loads((ROOT / "data" / "metrics.json").read_text(encoding="utf-8"))
-    manifest = json.loads((ROOT / "data" / "manifest.json").read_text(encoding="utf-8"))
-    bench = (ROOT / "docs" / "BENCH.md").read_text(encoding="utf-8")
-    docs = {p: p.read_text(encoding="utf-8", errors="replace") for p in DOCS if p.exists()}
-    return metrics, manifest, bench, docs
+class Check:
+    """Shared state for the passes: documents, lazily loaded sources, failures."""
 
+    def __init__(self) -> None:
+        self.docs = {p: p.read_text(encoding="utf-8", errors="replace") for p in DOCS if p.exists()}
+        self.readme = self.docs[ROOT / "README.md"]
+        self.fm = self.docs[ROOT / "docs" / "FAILURE_MODES.md"]
+        self.fails: list[str] = []
+        self.count = 0
+        self._json: dict[str, dict] = {}
 
-def main() -> int:
-    metrics, manifest, bench, docs = load()
-    readme = docs[ROOT / "README.md"]
-    fm = docs[ROOT / "docs" / "FAILURE_MODES.md"]
-    fails: list[str] = []
+    def source(self, name: str) -> dict | None:
+        """A JSON source under data/, loaded once; a missing file is a failure."""
+        if name not in self._json:
+            path = ROOT / "data" / name
+            if not path.exists():
+                self.fails.append(f"data/{name} is missing; the build step that writes it has not run")
+                self._json[name] = None
+            else:
+                self._json[name] = json.loads(path.read_text(encoding="utf-8"))
+        return self._json[name]
 
-    def expect(label: str, text: str, token: str, where: str) -> None:
+    def expect(self, label: str, text: str, token: str, where: str) -> None:
+        self.count += 1
         if token not in text:
-            fails.append(f"{where}: expected {token!r} ({label})")
+            self.fails.append(f"{where}: expected {token!r} ({label})")
 
-    # ------------------------------------------------------------ 1. POSITIVE
-    c = metrics["confusion"]
-    tri = metrics["triage"]
-    ps = metrics["per_scenario"]
+    def derived(self, label: str, ok: bool, token: str, text: str, where: str = "README") -> None:
+        self.count += 1
+        if not ok:
+            self.fails.append(f"DERIVED {label}: arithmetic does not hold")
+        elif token not in text:
+            self.fails.append(f"{where}: expected derived phrase {token!r} ({label})")
+
+
+def spread(rows: list[dict], key: str) -> tuple[float, float, float]:
+    vals = [r[key] for r in rows]
+    return statistics.median(vals), min(vals), max(vals)
+
+
+# ---------------------------------------------------------------- 1. POSITIVE
+def pass_positive(ck: Check) -> None:
+    metrics, manifest = ck.source("metrics.json"), ck.source("manifest.json")
+    if metrics is None or manifest is None:
+        return
+    bench = (ROOT / "docs" / "BENCH.md").read_text(encoding="utf-8")
+    c, tri, ps = metrics["confusion"], metrics["triage"], metrics["per_scenario"]
     full = [r for r in metrics["seed_matrix"] if r["variant"] == "full"]
 
-    checks = [
+    for label, token in [
         ("precision @ target",   f"{metrics['precision_at_target_prevalence']:.4f}"),
         ("precision",            f"{metrics['precision']:.4f}"),
         ("recall",               f"{metrics['recall']:.4f}"),
@@ -83,10 +118,9 @@ def main() -> int:
         ("outage events",        f"{ps['outage_single_merchant']['events']:,}"),
         ("triage trips",         f"{tri['trips']} trips"),
         ("triage 1 in N",        f"1 in {round(1 / tri['legit_decline_rate'])}"),
-        ("triage outage alerted",  f"{tri['per_scenario']['outage_single_merchant']['alerted']:,}"),
-    ]
-    for label, token in checks:
-        expect(label, readme, token, "README")
+        ("triage outage alerted", f"{tri['per_scenario']['outage_single_merchant']['alerted']:,}"),
+    ]:
+        ck.expect(label, ck.readme, token, "README")
 
     # The 2.1a table in FAILURE_MODES carries the per-count triage figures.
     for label, token in [
@@ -96,7 +130,7 @@ def main() -> int:
         ("triage 1 in N",          f"1 in {round(1 / tri['legit_decline_rate'])}"),
         ("triage trips",           f"**{tri['trips']}**"),
     ]:
-        expect(label, fm, token, "FAILURE_MODES")
+        ck.expect(label, ck.fm, token, "FAILURE_MODES")
 
     for label, token in [
         ("multiseed net median", f"₹{statistics.median(r['net_rupees'] for r in full):,.0f}"),
@@ -104,11 +138,11 @@ def main() -> int:
         ("multiseed net max",    f"₹{max(r['net_rupees'] for r in full):,.0f}"),
         ("multiseed precision",  f"{statistics.median(r['precision'] for r in full):.4f}"),
     ]:
-        expect(label, readme, token, "README")
-        expect(label, fm, token, "FAILURE_MODES")
+        ck.expect(label, ck.readme, token, "README")
+        ck.expect(label, ck.fm, token, "FAILURE_MODES")
 
     neg = manifest["negative_case"]
-    assumptions = docs[ROOT / "python" / "spandan" / "gen" / "ASSUMPTIONS.md"]
+    assumptions = ck.docs[ROOT / "python" / "spandan" / "gen" / "ASSUMPTIONS.md"]
     for label, token in [
         ("flash-sale known share",   f"{neg['flash_sale_known_customer_share'] * 100:.1f}%"),
         ("flash-sale new share",     f"{neg['flash_sale_new_customer_share'] * 100:.1f}%"),
@@ -117,113 +151,170 @@ def main() -> int:
         ("outage known share",       f"{neg['issuer_outage']['known_customer_share'] * 100:.1f}%"),
         ("outage distinct BINs",     f"{neg['issuer_outage']['distinct_bins']}"),
     ]:
-        expect(label, assumptions, token, "ASSUMPTIONS")
+        ck.expect(label, assumptions, token, "ASSUMPTIONS")
 
     # README bench figures must match BENCH.md (consistency).
-    for token in re.findall(r"\b\d{1,3}(?:,\d{3})+ events/s|\b\d+\.\d+µs|\b\d,\d{3} bytes|\d+\.\d+ GB|\d\.\d{2}×", readme):
+    for token in re.findall(r"\b\d{1,3}(?:,\d{3})+ events/s|\b\d+\.\d+µs|\b\d,\d{3} bytes|\d+\.\d+ GB|\d\.\d{2}×", ck.readme):
         norm = token.replace("µs", "").replace(" events/s", "").replace(" bytes", "").replace(" GB", "").replace("×", "")
+        ck.count += 1
         if norm not in bench:
-            fails.append(f"README bench figure {token!r} not found in BENCH.md")
+            ck.fails.append(f"README bench figure {token!r} not found in BENCH.md")
 
-    # ------------------------------------------------------------ 2. DERIVED
-    derived = [
-        ("50.5% outage flagged",  abs(ps['outage_single_merchant']['flagged'] / ps['outage_single_merchant']['events'] * 100 - 50.5) < 0.05, "50.5%"),
-        ("42 events per alert",   round((c['tp'] + c['fp']) / metrics['alerts']) == 42, "42 events per alert"),
-        ("31% recovery",          abs(tri['per_scenario']['outage_single_merchant']['alerted'] / c['fp'] * 100 - 31) < 1.0, "31%"),
-        ("TP unchanged by triage", tri['tp_declined'] == tri['tp_raw'] == c['tp'], f"{c['tp']:,} → {c['tp']:,}"),
-        ("eleven false alarms",   round((1 - metrics['precision_at_target_prevalence']) / metrics['precision_at_target_prevalence']) == 11, "eleven false alarms"),
-    ]
-    for label, ok, token in derived:
-        if not ok:
-            fails.append(f"DERIVED {label}: arithmetic does not hold")
-        elif token not in readme:
-            fails.append(f"README: expected derived phrase {token!r} ({label})")
 
-    # ------------------------------------------------------------ 3. DIAGRAM
+# ----------------------------------------------------------------- 2. DERIVED
+def pass_derived(ck: Check) -> None:
+    metrics = ck.source("metrics.json")
+    if metrics is None:
+        return
+    c, tri, ps = metrics["confusion"], metrics["triage"], metrics["per_scenario"]
+    outage = ps["outage_single_merchant"]
+    ck.derived("50.5% outage flagged", abs(outage["flagged"] / outage["events"] * 100 - 50.5) < 0.05, "50.5%", ck.readme)
+    ck.derived("42 events per alert", round((c["tp"] + c["fp"]) / metrics["alerts"]) == 42, "42 events per alert", ck.readme)
+    ck.derived("31% recovery", abs(tri["per_scenario"]["outage_single_merchant"]["alerted"] / c["fp"] * 100 - 31) < 1.0, "31%", ck.readme)
+    ck.derived("TP unchanged by triage", tri["tp_declined"] == tri["tp_raw"] == c["tp"], f"{c['tp']:,} → {c['tp']:,}", ck.readme)
+    p = metrics["precision_at_target_prevalence"]
+    ck.derived("eleven false alarms", round((1 - p) / p) == 11, "eleven false alarms", ck.readme)
+
+
+# ----------------------------------------------------------------- 3. DIAGRAM
+def pass_diagram(ck: Check) -> None:
     sys.path.insert(0, str(ROOT / "python"))
     from spandan.triage.graph import render_mermaid  # noqa: E402
 
-    blocks = re.findall(r"```mermaid\n(.*?)\n```", readme, re.S)
+    blocks = re.findall(r"```mermaid\n(.*?)\n```", ck.readme, re.S)
+    ck.count += 1
     if render_mermaid().strip() not in [b.strip() for b in blocks]:
-        fails.append("README: the triage mermaid block is not what render_mermaid() produces")
+        ck.fails.append("README: the triage mermaid block is not what render_mermaid() produces")
 
-    # ------------------------------------------------------------ 4. NEGATIVE
+
+# ---------------------------------------------------------------- 4. NEGATIVE
+def pass_negative(ck: Check) -> None:
     # Superseded figures. Allowed only where they are explicitly history.
     history = {"AUDIT.md", "BUILD_LOG.md", "PHASES.md"}
     banned = ["39.9%", "7,240", "1,573", "0.3985", "23.05", "₹8,595", "₹1.79L", "13,947",
               "11,800", "₹2.82L", "₹5.59L", "₹2.91L", "57.5%", "~42%", "~10%", "5.36",
               "89.9%", "₹1,664", "82.4%", "120,053", "24.80", "119.30", "21,766", "3,874",
               "31.0 GB", "2,058 MB"]
-    for path, text in docs.items():
+    for path, text in ck.docs.items():
         if path.name in history:
             continue
         body = text.split("## 6. These figures moved")[0] if path.name == "BENCH.md" else text
         for fig in banned:
+            ck.count += 1
             if fig in body:
-                fails.append(f"{path.relative_to(ROOT)}: superseded figure {fig!r} survives")
+                ck.fails.append(f"{path.relative_to(ROOT)}: superseded figure {fig!r} survives")
 
-    # ------------------------------------------------------------ 5. BASELINES
-    baselines_path = ROOT / "data" / "baselines.json"
-    n_baselines = 0
-    if not baselines_path.exists():
-        fails.append("data/baselines.json is missing; run `make baselines`")
-    else:
-        bl = json.loads(baselines_path.read_text(encoding="utf-8"))
-        sm = bl["seed_matrix"]
 
-        def spread(name: str, key: str) -> tuple[float, float, float]:
-            vals = [r[key] for r in sm if r["model"] == name]
-            return statistics.median(vals), min(vals), max(vals)
-
-        for name in ("hand", "logreg6", "gbm9"):
-            row = bl["models"][name]
-            for label, token, where, text in [
-                (f"{name} p@base",    f"{row['precision_at_target_prevalence']:.4f}", "FAILURE_MODES", fm),
-                (f"{name} precision", f"{row['precision']:.4f}", "FAILURE_MODES", fm),
-                (f"{name} recall",    f"{row['recall']:.4f}", "FAILURE_MODES", fm),
-                (f"{name} net",       f"{row['net_rupees']:,.0f}", "FAILURE_MODES", fm),
-                (f"{name} 1 in N",    f"1 in {round(1 / row['legit_decline_rate'])}", "FAILURE_MODES", fm),
-            ]:
-                expect(label, text, token, where)
-                n_baselines += 1
-            for scenario in ("issuer_outage", "outage_single_merchant"):
-                v = row["per_scenario"][scenario]
-                expect(f"{name} {scenario}", fm, f"{v['flagged']:,}/{v['events']:,} ({v['rate']:.1%})", "FAILURE_MODES")
-                n_baselines += 1
-            for key, label in (("precision_at_target_prevalence", "p@base"), ("recall", "recall"), ("net_rupees", "net")):
-                med, lo, hi = spread(name, key)
-                fmt = (lambda v: f"{v:,.0f}") if key == "net_rupees" else (lambda v: f"{v:.4f}")
-                for text, where in ((fm, "FAILURE_MODES"), (readme, "README")):
-                    expect(f"{name} median {label}", text, fmt(med), where)
-                    n_baselines += 1
-                expect(f"{name} min {label}", fm, fmt(lo), "FAILURE_MODES")
-                expect(f"{name} max {label}", fm, fmt(hi), "FAILURE_MODES")
-                n_baselines += 2
-        for term, w in bl["models"]["logreg6"]["weights"].items():
-            expect(f"logreg6 multiplier {term}", fm, f"{w:+.3f}", "FAILURE_MODES")
-            n_baselines += 1
-        # The control: the hand row's spread is the harness's own seed matrix.
-        hand_net = spread("hand", "net_rupees")
-        harness_net = [r["net_rupees"] for r in full]
-        if abs(hand_net[0] - statistics.median(harness_net)) > 0.5:
-            fails.append("BASELINES: the hand row's median net does not equal the harness seed matrix")
-        outage = bl["models"]["logreg6"]["per_scenario"]["outage_single_merchant"]
-        boosted = bl["models"]["gbm9"]["per_scenario"]["outage_single_merchant"]
-        for label, ok, token in [
-            ("45% outage under logreg6", round(outage["flagged"] / outage["events"] * 100) == 45, "45%"),
-            ("70% outage under gbm9",    round(boosted["flagged"] / boosted["events"] * 100) == 70, "70%"),
+# --------------------------------------------------------------- 5. BASELINES
+def pass_baselines(ck: Check) -> None:
+    bl, metrics = ck.source("baselines.json"), ck.source("metrics.json")
+    if bl is None or metrics is None:
+        return
+    sm = bl["seed_matrix"]
+    for name in ("hand", "logreg6", "gbm9"):
+        row = bl["models"][name]
+        for label, token in [
+            (f"{name} p@base",    f"{row['precision_at_target_prevalence']:.4f}"),
+            (f"{name} precision", f"{row['precision']:.4f}"),
+            (f"{name} recall",    f"{row['recall']:.4f}"),
+            (f"{name} net",       f"{row['net_rupees']:,.0f}"),
+            (f"{name} 1 in N",    f"1 in {round(1 / row['legit_decline_rate'])}"),
         ]:
-            if not ok:
-                fails.append(f"DERIVED {label}: arithmetic does not hold")
-            elif token not in readme:
-                fails.append(f"README: expected derived phrase {token!r} ({label})")
-            n_baselines += 1
+            ck.expect(label, ck.fm, token, "FAILURE_MODES")
+        for scenario in ("issuer_outage", "outage_single_merchant"):
+            v = row["per_scenario"][scenario]
+            ck.expect(f"{name} {scenario}", ck.fm, f"{v['flagged']:,}/{v['events']:,} ({v['rate']:.1%})", "FAILURE_MODES")
+        rows = [r for r in sm if r["model"] == name]
+        for key, label in (("precision_at_target_prevalence", "p@base"), ("recall", "recall"), ("net_rupees", "net")):
+            med, lo, hi = spread(rows, key)
+            fmt = (lambda v: f"{v:,.0f}") if key == "net_rupees" else (lambda v: f"{v:.4f}")
+            ck.expect(f"{name} median {label}", ck.fm, fmt(med), "FAILURE_MODES")
+            ck.expect(f"{name} median {label}", ck.readme, fmt(med), "README")
+            ck.expect(f"{name} min {label}", ck.fm, fmt(lo), "FAILURE_MODES")
+            ck.expect(f"{name} max {label}", ck.fm, fmt(hi), "FAILURE_MODES")
+    for term, w in bl["models"]["logreg6"]["weights"].items():
+        ck.expect(f"logreg6 multiplier {term}", ck.fm, f"{w:+.3f}", "FAILURE_MODES")
+    # The control: the hand row's spread is the harness's own seed matrix.
+    full = [r for r in metrics["seed_matrix"] if r["variant"] == "full"]
+    ck.count += 1
+    if abs(spread([r for r in sm if r["model"] == "hand"], "net_rupees")[0] - statistics.median(r["net_rupees"] for r in full)) > 0.5:
+        ck.fails.append("BASELINES: the hand row's median net does not equal the harness seed matrix")
+    outage = bl["models"]["logreg6"]["per_scenario"]["outage_single_merchant"]
+    boosted = bl["models"]["gbm9"]["per_scenario"]["outage_single_merchant"]
+    ck.derived("45% outage under logreg6", round(outage["flagged"] / outage["events"] * 100) == 45, "45%", ck.readme)
+    ck.derived("70% outage under gbm9", round(boosted["flagged"] / boosted["events"] * 100) == 70, "70%", ck.readme)
 
-    print(f"checked {len(checks) + 4 + 6 + len(derived) + n_baselines} figures across {len(docs)} documents "
-          f"(engine in metrics.json: {metrics['engine']})")
-    if fails:
+
+# -------------------------------------------------------------- 6. EXPERIMENT
+EXPERIMENTS = {"long_horizon": "experiment_long_horizon.json", "long_horizon_x5": "experiment_long_horizon_x5.json"}
+
+
+def pass_experiment(ck: Check) -> None:
+    """The section 7 table: for each registered variant, the seed-zero figures
+    and the three-seed spread, beside the frozen detector's own rows from the
+    same runs. Figures are quoted in FAILURE_MODES section 7."""
+    for variant, filename in EXPERIMENTS.items():
+        ex = ck.source(filename)
+        if ex is None:
+            continue
+        ck.count += 1
+        if ex.get("variant") != variant:
+            ck.fails.append(f"data/{filename}: variant label is {ex.get('variant')!r}, expected {variant!r}")
+        outage = ex["per_scenario"]["outage_single_merchant"]
+        for label, token in [
+            (f"{variant} outage flag rate", f"{outage['flagged'] / outage['events'] * 100:.1f}%"),
+            (f"{variant} p@base",           f"{ex['precision_at_target_prevalence']:.4f}"),
+            (f"{variant} recall",           f"{ex['recall']:.4f}"),
+            (f"{variant} legit decline %",  f"{ex['legit_decline_rate'] * 100:.2f}%"),
+            (f"{variant} 1 in N",           f"1 in {round(1 / ex['legit_decline_rate'])}"),
+            (f"{variant} alerts/day",       f"{ex['alerts_per_day']:.1f}"),
+        ]:
+            ck.expect(label, ck.fm, token, "FAILURE_MODES")
+        rows = [r for r in ex["seed_matrix"] if r["variant"] == variant]
+        frozen = [r for r in ex["seed_matrix"] if r["variant"] == "full"]
+        for key, label, fmt in (
+            ("precision", "precision", lambda v: f"{v:.4f}"),
+            ("recall", "recall", lambda v: f"{v:.4f}"),
+            ("net_rupees", "net", lambda v: f"{v:,.0f}"),
+        ):
+            med, lo, hi = spread(rows, key)
+            for what, val in (("median", med), ("min", lo), ("max", hi)):
+                ck.expect(f"{variant} {what} {label}", ck.fm, fmt(val), "FAILURE_MODES")
+        # The frozen rows inside the experiment run must be the frozen detector's
+        # own seed matrix, or the comparison is not like for like.
+        metrics = ck._json.get("metrics.json")
+        if metrics:
+            full = [r for r in metrics["seed_matrix"] if r["variant"] == "full"]
+            ck.count += 1
+            if [round(r["net_rupees"], 2) for r in frozen] != [round(r["net_rupees"], 2) for r in full]:
+                ck.fails.append(f"EXPERIMENT {variant}: the frozen rows in the experiment run differ from make eval")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Every documented figure, checked against the build.")
+    parser.add_argument("--only", choices=PASSES, default=None)
+    parser.add_argument("--skip", choices=PASSES, action="append", default=[])
+    args = parser.parse_args(argv)
+    active = [args.only] if args.only else [p for p in PASSES if p not in args.skip]
+
+    ck = Check()
+    runners = {
+        "positive": pass_positive, "derived": pass_derived, "diagram": pass_diagram,
+        "negative": pass_negative, "baselines": pass_baselines, "experiment": pass_experiment,
+    }
+    # metrics.json is read by several passes; load it first when any of them runs
+    # so the experiment pass can cross-check against it if it is present.
+    if "experiment" in active and (ROOT / "data" / "metrics.json").exists():
+        ck.source("metrics.json")
+    for name in active:
+        runners[name](ck)
+
+    engine = ck._json.get("metrics.json", {}) or {}
+    print(f"passes {', '.join(active)}: checked {ck.count} figures across {len(ck.docs)} documents"
+          + (f" (engine in metrics.json: {engine['engine']})" if engine else ""))
+    if ck.fails:
         print("FAIL")
-        for f in fails:
+        for f in ck.fails:
             print("  -", f)
         return 1
     print("PASS: every asserted figure matches the build")
