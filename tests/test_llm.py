@@ -50,7 +50,8 @@ def no_network(monkeypatch):
         raise AssertionError("a test in test_llm.py attempted to open a socket")
 
     monkeypatch.setattr(socket, "socket", _refuse)
-    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
     monkeypatch.delenv("SPANDAN_LLM_MODE", raising=False)
 
 
@@ -211,8 +212,25 @@ def test_record_mode_without_key_still_never_reaches_the_network(monkeypatch):
     monkeypatch.setenv("SPANDAN_LLM_MODE", "record")
     from spandan.llm import provider
 
-    with pytest.raises(RuntimeError, match="requires GROQ_API_KEY"):
+    with pytest.raises(RuntimeError, match="requires ANTHROPIC_API_KEY"):
         provider.complete("unrecorded prompt for the record-mode test")
+
+
+def test_replay_needs_no_sdk(monkeypatch):
+    """Replay must work with the anthropic SDK absent: it is an optional extra
+    for recording only, imported inside the record path after the key check.
+    Poisoning the import proves replay never reaches for it."""
+    import sys
+
+    monkeypatch.setitem(sys.modules, "anthropic", None)
+    from spandan.llm import provider
+
+    cassette = json.loads(sorted(CASSETTE_DIR.glob("*.json"))[0].read_text(encoding="utf-8"))
+    assert provider.complete(cassette["prompt"], cassette["model"]) == cassette["response_text"]
+    monkeypatch.setenv("SPANDAN_LLM_MODE", "record")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "not-a-real-key")
+    with pytest.raises(RuntimeError, match="needs the anthropic SDK"):
+        provider.complete("a prompt no cassette has ever seen, with the sdk poisoned")
 
 
 def test_cassettes_declare_their_provenance():

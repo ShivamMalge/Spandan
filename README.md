@@ -526,11 +526,12 @@ one model in the system has been shown to invent evidence. Detail in
   `recorded_via` names the provider and exact model. The two cassettes that
   constitute the fabrication finding were recorded on the **Gemini API free tier**
   (`gemini-3.1-flash-lite`), where Google may use prompts and responses to improve
-  its products. Later cassettes are recorded via the **Groq API**
-  (`llama-3.3-70b-versatile`, `GROQ_API_KEY`); Groq's privacy policy and terms of
-  use defer API data handling to its Services Agreement and DPA, which were not
-  reviewed here. In every case the prompt contains only synthetic identifiers from
-  reserved ranges — there is no real card, IP, or merchant to leak.
+  its products. Later cassettes are recorded through the **Anthropic API**
+  (`claude-haiku-4-5`, `ANTHROPIC_API_KEY`, via the official `anthropic` SDK
+  installed as the optional `record` extra and imported only on the record path);
+  Anthropic's commercial terms govern how those prompts and responses are handled,
+  and are not summarised here. In every case the prompt contains only synthetic
+  identifiers from reserved ranges — there is no real card, IP, or merchant to leak.
 
 ## Repo map
 

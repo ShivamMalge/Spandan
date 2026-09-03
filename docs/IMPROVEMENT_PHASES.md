@@ -303,7 +303,7 @@ rejects any explanation referencing evidence outside the `Flag`. Build it.
 
 2. **Measure it, do not assert it.** Run the validator over both committed
    cassettes: it must reject both (they are the fabrication finding). Then,
-   because the recording provider changed to Groq (`llama-3.3-70b-versatile`)
+   because the recording provider changed to the Anthropic API (`claude-haiku-4-5`)
    between the finding and this phase, record **two pairs**, not one, so the
    two variables are not confounded: the *plain* prompt on the new model (does
    a different model family fabricate?) and the *grounded* prompt on the new
@@ -327,11 +327,11 @@ loops, a second provider.
 **Acceptance criteria.**
 
 ```
-env -u GROQ_API_KEY pytest tests/test_llm.py -v          # all pass, sockets blocked
+env -u ANTHROPIC_API_KEY pytest tests/test_llm.py -v     # all pass, sockets blocked
 pytest tests/test_llm.py::test_eval_runs_with_llm_import_poisoned   # STILL GREEN
 python -m spandan.cli explain --flag-id txn_000804993    # exit 4 (validator rejection), template shown
 python -m spandan.cli validate-cassettes                 # one verdict per cassette, with reasons
-ls python/spandan/llm/cassettes/ | wc -l                 # 6: 2 gemini plain, 2 groq plain, 2 groq grounded
+ls python/spandan/llm/cassettes/ | wc -l                 # 6: 2 gemini plain, 2 haiku plain, 2 haiku grounded
 ```
 
 **Effort.** 3h. **Risk: low.** Gains: axis 7 → 7, axis 9 → 9.
