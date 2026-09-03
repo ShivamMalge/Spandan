@@ -412,3 +412,37 @@ runs the graph over a 4-day fixture where the scan never hurt. A property
 that is correct and quadratic passes every correctness test there is. The
 guard was right; it was the data structure behind it that had not been
 thought about at 20,000 flags.
+
+## 2026-09-03 — CI went red at pytest on Linux; the parity fixture was exact to a C runtime, not to the detector
+
+**Phase:** Improvement Phase B (CI)
+**Symptom:** the first GitHub Actions runs failed at the pytest step on ubuntu
+while the same 119 tests passed on the Windows machine that wrote every
+fixture. Job logs are not readable through the REST API without admin rights
+on the repository, so the failure arrived with no text.
+**First believed:** the new bench-guard test, which faked win32 on a Linux host
+and then called Win32 memory counters that do not exist there. True, and fixed
+(36849ab) — and the next run failed at the same step.
+**Actually wrong:** `tests/fixtures/parity.json` and its TSV twin are compared
+byte for byte against a regeneration by the pure-Python reference. The
+reference calls `math.exp` and `math.log`; glibc and the Windows C runtime
+round those differently in the last bit. Measured under WSL Ubuntu (Python
+3.12, glibc) with the same builder: 640 of 3,866 scores differ, the largest by
+2.8e-14, and every non-score field is identical. The detector did not change.
+The fixture was exact to the libm that wrote it.
+**Fix:** the two currency tests compare bytes on win32, where the fixture was
+generated, and elsewhere compare every non-score field exactly and the scores
+within the tolerance the fixture itself declares (1e-9), five orders of
+magnitude above the measured drift. A stale fixture still fails everywhere: a
+real detector change moves scores by far more than 1e-9. Test-only;
+`git diff --stat` on `python/spandan/detect` and `spandan-core` is empty.
+**Proved by:** both tests pass on Windows (the exact branch) and under WSL
+glibc (the tolerance branch, pure-Python reference with the extension stubbed).
+**Worth noting:** "bit-exact" in this repository means the two engines agree
+with each other on one machine, and the parity test on that machine still
+demands zero difference. Across C runtimes the reference itself moves at the
+fourteenth decimal. Every documented figure survived the move: the CI
+`figures` job regenerated the stream and the evaluation on ubuntu and
+`make check` passed 31 of 31 — the figures are quoted at four decimals and the
+drift lives at fourteen. That is the gap between a number that reproduces and
+a byte that does.

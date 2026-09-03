@@ -9,7 +9,9 @@ to restate what the Python happens to do.
 from __future__ import annotations
 
 import dataclasses
+import json
 import random
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -317,11 +319,46 @@ def test_the_scoring_terms_are_frozen():
     }, f"the scoring terms changed: {sorted(terms)}"
 
 
-def test_parity_fixture_is_current():
-    """The committed fixture must match what the frozen reference produces now.
+def _parse_parity_json(text: str) -> tuple[dict, list[float], float]:
+    doc = json.loads(text)
+    scores = doc.pop("expected_scores")
+    return doc, scores, float(doc["tolerance"])
 
-    This is the freeze's teeth. If someone changes `reference.py` during Phase 3,
-    the Rust core would be ported against a spec that no longer matches the
+
+def _parse_parity_tsv(text: str) -> tuple[dict, list[float], float]:
+    lines = text.splitlines()
+    head, rows = lines[:3], [line.rsplit("	", 1) for line in lines[3:]]
+    meta = {"head": head, "events": [cells for cells, _ in rows]}
+    return meta, [float(score) for _, score in rows], float(head[0].split("	")[1])
+
+
+def _assert_fixture_current(on_disk: str, regenerated: str, parse, stale_message: str) -> None:
+    """Exact bytes on the platform that wrote the fixture; the same data within
+    the tolerance the fixture itself declares everywhere else.
+
+    The fixtures were generated on Windows. Under glibc the pure-Python
+    reference regenerates 640 of the 3,866 scores with last-bit differences,
+    the largest 2.8e-14, and every non-score field identical (BUILD_LOG,
+    2026-09-03): `math.exp` and `math.log` round differently across C
+    runtimes. The detector did not change; the fixture is exact to a libm.
+    A stale fixture still fails on every platform - a real detector change
+    moves scores by far more than the 1e-9 the fixture allows.
+    """
+    if sys.platform == "win32":
+        assert on_disk == regenerated, stale_message
+        return
+    disk_meta, disk_scores, tolerance = parse(on_disk)
+    new_meta, new_scores, _ = parse(regenerated)
+    assert disk_meta == new_meta, "a non-score field of the fixture differs; " + stale_message
+    assert len(disk_scores) == len(new_scores), stale_message
+    worst = max(abs(a - b) for a, b in zip(disk_scores, new_scores))
+    assert worst <= tolerance, f"scores drift by {worst:.3e} > {tolerance:.0e}; " + stale_message
+
+
+def test_parity_fixture_is_current():
+    """The committed parity fixture must be what the frozen reference produces.
+
+    If the reference detector ever changes, parity.json would silently describe old
     Python, and the parity test would compare the port to a stale artifact while
     still passing. This test fails first.
     """
@@ -330,12 +367,13 @@ def test_parity_fixture_is_current():
     fixture_path = Path(__file__).resolve().parent / "fixtures" / "parity.json"
     assert fixture_path.exists(), "tests/fixtures/parity.json is missing; it must be committed"
 
-    on_disk = fixture_path.read_text(encoding="utf-8")
-    regenerated = parity.serialise(parity.build_fixture())
-    assert on_disk == regenerated, (
+    _assert_fixture_current(
+        fixture_path.read_text(encoding="utf-8"),
+        parity.serialise(parity.build_fixture()),
+        _parse_parity_json,
         "the parity fixture is stale - the reference detector changed after it was "
         "written. Either revert the detector (it is FROZEN through Phase 3) or "
-        "regenerate with `python -m spandan.detect.parity` and re-approve."
+        "regenerate with `python -m spandan.detect.parity` and re-approve.",
     )
 
 
@@ -350,10 +388,12 @@ def test_parity_fixture_is_current_tsv():
     tsv_path = Path(__file__).resolve().parent / "fixtures" / "parity.tsv"
     assert tsv_path.exists(), "tests/fixtures/parity.tsv is missing; cargo test reads it"
 
-    regenerated = parity.serialise_tsv(parity.build_fixture())
-    assert tsv_path.read_text(encoding="utf-8") == regenerated, (
+    _assert_fixture_current(
+        tsv_path.read_text(encoding="utf-8"),
+        parity.serialise_tsv(parity.build_fixture()),
+        _parse_parity_tsv,
         "parity.tsv is stale relative to the frozen reference - regenerate with "
-        "`python -m spandan.detect.parity` and re-approve"
+        "`python -m spandan.detect.parity` and re-approve",
     )
 
 

@@ -53,7 +53,7 @@ coverage — not on the official page, so treated as reported. Where each lives:
 — 119 Python and 33 Rust tests, two engines bit-exact over 1.6M events,
 reproduction from a fresh clone. **AI judgment** — the language model is
 structurally unable to reach a number and its notes are validated; see *Where
-AI is*. **Failure recovery** — [BUILD_LOG.md](docs/BUILD_LOG.md): twelve entries,
+AI is*. **Failure recovery** — [BUILD_LOG.md](docs/BUILD_LOG.md): thirteen entries,
 each with the wrong diagnosis written before the right one;
 `spandan replay --cold-start` demonstrates a failure mode live; and the triage
 graph's kill-switch is a graceful degradation aimed at the measured worst
@@ -308,7 +308,10 @@ of 58 of 512 and never saturated, so "bit-exact" meant bit-exact on the happy pa
 until a 900-event mega-burst was added. **The real parity test is the engine swap** —
 `make eval ENGINE=rust` against `ENGINE=python` over 1.6M events at full state depth
 across three streams and three detector variants. The two metrics JSONs differ in
-one line, the engine label.
+one line, the engine label. Both statements hold per machine: across C runtimes
+the pure-Python reference itself moves at the fourteenth decimal (640 of the 3,866
+fixture scores, at most 2.8e-14, [BUILD_LOG](docs/BUILD_LOG.md) 2026-09-03), which
+no four-decimal figure sees — the CI `figures` job reproduces all 31 on ubuntu.
 
 **The Rust trade, both halves:** Rust buys a 5.38× streaming throughput gain and a
 4.52× better p99 (11.6µs vs 52.4µs) at 2.44× the memory per entity — 4,819 vs 1,971
