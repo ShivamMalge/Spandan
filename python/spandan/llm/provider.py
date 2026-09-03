@@ -90,6 +90,18 @@ def complete(prompt: str, model: str = MODEL_ID) -> str:
     return _record(prompt, model, key, path)
 
 
+def record_request(prompt: str, model: str) -> dict:
+    """The exact keyword arguments the record path hands to the SDK. Kept as
+    data so a test can check them against the installed SDK signature: the
+    1.x SDK dropped `temperature` from `messages.create`, and the first
+    recording attempt found that out at the terminal."""
+    return {
+        "model": model,
+        "max_tokens": MAX_TOKENS,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+
+
 def _record(prompt: str, model: str, key: str, path: Path) -> str:
     # The key check comes first, before the SDK is even imported: record mode
     # without a key must die before anything could open a socket.
@@ -107,12 +119,7 @@ def _record(prompt: str, model: str, key: str, path: Path) -> str:
 
     client = anthropic.Anthropic(api_key=api_key, max_retries=2, timeout=60.0)
     try:
-        response = client.messages.create(
-            model=model,
-            max_tokens=MAX_TOKENS,
-            temperature=0.0,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        response = client.messages.create(**record_request(prompt, model))
     except anthropic.AuthenticationError as err:
         raise RuntimeError(f"record call refused: {API_KEY_ENV} was not accepted ({err.message})") from err
     except anthropic.RateLimitError as err:
@@ -149,7 +156,7 @@ def _record(prompt: str, model: str, key: str, path: Path) -> str:
                 "model": model,
                 "recorded_via": (
                     f"anthropic messages api via the anthropic python sdk {anthropic.__version__}, "
-                    f"model {model} (served as {response.model}), temperature 0, "
+                    f"model {model} (served as {response.model}), default sampling, "
                     f"max_tokens {MAX_TOKENS}, SPANDAN_LLM_MODE=record"
                 ),
                 "stop_reason": response.stop_reason,

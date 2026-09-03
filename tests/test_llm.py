@@ -233,6 +233,24 @@ def test_replay_needs_no_sdk(monkeypatch):
         provider.complete("a prompt no cassette has ever seen, with the sdk poisoned")
 
 
+def test_record_request_matches_the_installed_sdk_signature():
+    """Every keyword the record path passes must be a parameter of the installed
+    SDK's messages.create. The 1.x SDK removed `temperature`; the first
+    recording attempt failed at the terminal instead of here. Skipped when the
+    optional record extra is not installed (CI runs replay only)."""
+    import inspect
+
+    anthropic = pytest.importorskip("anthropic")
+    from spandan.llm import provider
+
+    accepted = set(inspect.signature(anthropic.resources.messages.Messages.create).parameters)
+    passed = set(provider.record_request("prompt", provider.MODEL_ID))
+    assert passed <= accepted, passed - accepted
+    client_params = set(inspect.signature(anthropic.Anthropic.__init__).parameters)
+    assert {"api_key", "max_retries", "timeout"} <= client_params
+    assert provider.MODEL_ID == "claude-haiku-4-5"
+
+
 def test_cassettes_declare_their_provenance():
     """Each cassette says exactly how it came to exist.
 
