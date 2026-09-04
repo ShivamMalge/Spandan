@@ -523,6 +523,18 @@ its `baselines.json` and both experiment JSONs are byte-identical to the
 repository's once the repository was re-run under the pinned scikit-learn 1.9.0
 (the clone had resolved 1.9.0 on its own, which is how the version effect of
 BUILD_LOG entry 15 came to light).
+
+**Verified again (Sep 4, on 018995f, the audit P0 commit).** Fresh clone, own venv,
+`make setup` from the dev extras, `make all`: stream regenerated, 134 tests passed
+and 1 skipped (the SDK-signature test, which skips without the optional record
+extra, as designed), `make eval`, `make baselines`, `make experiment`, `make demo`,
+`make check` PASS with 473 figures across 14 documents against the clone's own
+build. `cargo test --release`: 33 passed. `git status --porcelain` empty. The four
+JSON outputs the documents quote are byte-identical to the working
+repository's, engine label aside. CI green on the same commit in all three jobs
+(run 33838011034). The chain was interrupted twice by the tool session dying,
+not by the build, and resumed from the first missing output each time; no stage
+was repeated with a different result.
 CI green on the same commit in all three jobs (run 33744743775). The run was
 interrupted once by the tool shell dying mid-chain, not by the build; the
 remaining stages were resumed in the same clone from the first missing output,
