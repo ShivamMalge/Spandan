@@ -83,6 +83,18 @@ every claim on an edge is enforced by a test named in the text that follows.
                                                FAILURE_MODES section 8)
 ```
 
+## The stream contract
+
+One detector instance is a single-writer state machine over one totally ordered,
+at-most-once stream. Events must arrive in timestamp order with unique ids, and an
+instance must not be shared across threads: out-of-order or duplicate delivery
+corrupts the sliding window silently in both engines, and concurrent callers crash
+or corrupt state. Sharding by merchant or BIN, ordering within a shard, and
+de-duplication are the caller's responsibility. What is enforced today: each
+`Event` validates its fields on construction (status, types, non-negative amount),
+so both engines see the same input contract. Ordering and idempotency checks are
+the next build (external audit, 2026-09-03, B2, B3, B9).
+
 ## The walk, in prose
 
 1. **Generation** (`python/spandan/gen/`). A configurable synthetic Indian

@@ -847,6 +847,7 @@ def run_seed_matrix(
     config: DetectorConfig,
     model: CostModel,
     variants: tuple[str, ...] = VARIANTS,
+    gen_config=None,
 ) -> list[dict]:
     """Every variant on every seed.
 
@@ -857,17 +858,24 @@ def run_seed_matrix(
     spread.
 
     One generation per seed, one scoring pass per (seed, variant).
+
+    `gen_config(seed)` builds the generator configuration for a seed; the
+    default is the full 100-day stream the README quotes. Tests pass a small
+    one: the shape assertion does not need two 100-day streams (external audit,
+    2026-09-03, B12 - one test was 91% of the suite).
     """
     import tempfile
 
     from ..gen.build import build
     from ..gen.config import default_config
 
+    if gen_config is None:
+        gen_config = default_config
     rows = []
     for offset in range(max(seed_count, 1)):
         seed = base_seed + offset
         with tempfile.TemporaryDirectory() as tmp:
-            manifest = build(default_config(seed=seed), tmp)
+            manifest = build(gen_config(seed), tmp)
             split = load_split(tmp)
             windows = manifest["episode_windows"]
             for name in variants:

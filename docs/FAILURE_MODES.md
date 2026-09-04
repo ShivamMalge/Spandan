@@ -611,6 +611,10 @@ From `gen/ASSUMPTIONS.md` §2:
 - **Cold-start cost is counted, not costed** — the replay path does not run the
   cost model.
 - **Variance reduction was not attempted.** §3's null result is a consequence.
+- **Out-of-order and duplicate delivery were not measured.** Both corrupt the
+  sliding window silently, in both engines, and a real webhook feed delivers
+  both (external audit, 2026-09-03, B2 and B3). The contract is stated in the
+  README and ARCHITECTURE; enforcement is the next build, not this one.
 
 ---
 

@@ -59,12 +59,17 @@ def replay(argv: list[str] | None = None) -> int:
         if metrics_path.exists():
             threshold = json.loads(metrics_path.read_text(encoding="utf-8"))["threshold"]
         else:
-            threshold = DetectorConfig().threshold
+            # Refuse rather than fall back: the config default 3.0 is a placeholder
+            # that flags a fifth of all traffic, and a reader who has not run
+            # `make eval` would see the detector look broken without knowing why
+            # (external audit, 2026-09-03, B8).
             print(
-                f"no {metrics_path} - using the placeholder threshold {threshold}. "
-                "Run `make eval` to select one on the validation window.",
+                f"no {metrics_path}: the operating threshold is selected on the validation "
+                "window by `make eval`, and this command will not replay on the config "
+                "placeholder. Run `make eval` first, or pass --threshold explicitly.",
                 file=sys.stderr,
             )
+            return 2
 
     events = read_stream(stream_path)
     if args.limit:

@@ -421,7 +421,12 @@ def test_multi_seed_spread_reported_for_all_headline_metrics(built):
     """
     from spandan.eval.harness import run_seed_matrix
 
-    rows = run_seed_matrix(2, SMALL_CONFIG.seed, DetectorConfig(), CostModel.load())
+    # The assertion is about shape, so the small stream is enough; the full
+    # 100-day matrix runs in `make eval` and the CI figures job.
+    rows = run_seed_matrix(
+        2, SMALL_CONFIG.seed, DetectorConfig(), CostModel.load(),
+        gen_config=lambda seed: dataclasses.replace(SMALL_CONFIG, seed=seed),
+    )
 
     seeds = {row["seed"] for row in rows}
     variants = {row["variant"] for row in rows}

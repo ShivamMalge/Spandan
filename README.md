@@ -6,11 +6,13 @@ A deterministic streaming detector for card-testing and velocity abuse on card
 authorization traffic, with a Rust core, a bit-exact Python reference, and an
 evaluation harness that prices its own false positives in rupees.
 
-**In fifteen seconds.** Precision **0.0824** at a realistic 0.15% base rate —
-eleven false alarms per catch. As an inline control it declines **1 in 71**
-legitimate customers, which is not deployable. The configuration this project
-would ship is alert-only at budget 2: 2.1 alerts a day, 35 of 60 attack episodes
-surfaced, 1 in 271 flagged. The one measured failure is a single-merchant issuer
+**In fifteen seconds.** The configuration this project would ship is alert-only
+at budget 2: 2.1 alerts a day, 35 of 60 attack episodes surfaced, **1 in 271**
+legitimate customers flagged, precision 0.2034 at a realistic 0.15% base rate. As
+an inline control the same detector reaches precision **0.0824** at that base
+rate — eleven false alarms per catch — and declines **1 in 71** legitimate
+customers, which is not deployable, and this file says so before anything else.
+The one measured failure is a single-merchant issuer
 outage, 50.5% of which is flagged as card testing; a kill-switch in the
 post-detection graph recovers 31% of those false declines (1 in 71 → 1 in 102)
 without touching a score. The detector-level fix, measured as an experiment,
@@ -58,7 +60,7 @@ strictly defense-only. Where each clause is met, and what proves it:
 Four evaluation criteria are reported for this buildathon by secondary
 coverage — not on the official page, so treated as reported. Where each lives:
 **Problem taste** — the loss class and the rupee model, above. **Build quality**
-— 130 Python and 33 Rust tests, two engines bit-exact over 1.6M events,
+— 135 Python and 33 Rust tests, two engines bit-exact over 1.6M events,
 reproduction from a fresh clone. **AI judgment** — the language model is
 structurally unable to reach a number and its notes are validated; see *Where
 AI is*. **Failure recovery** — [BUILD_LOG.md](docs/BUILD_LOG.md): fifteen entries,
@@ -147,8 +149,9 @@ make check                                          # every documented figure ag
 ```
 
 `make eval ENGINE=rust` runs the same evaluation through the Rust core and produces
-a byte-identical metrics JSON. `make test` runs 130 Python tests (~13 min, several
-build streams and run full evaluations) and `cargo test` runs 33 Rust tests.
+a byte-identical metrics JSON. `make test` runs 135 Python tests in about a minute
+(the seed-matrix shape test runs on a small stream; the full matrix is `make eval`)
+and `cargo test` runs 33 Rust tests.
 `make bench` reproduces [docs/BENCH.md](docs/BENCH.md). `make all` chains data,
 test, eval, demo and check. CI runs the test suite in one job and `make data`,
 `make eval` and `make check` in a parallel job on ubuntu, so every push regenerates
@@ -179,6 +182,18 @@ order. `update()` returns a `Flag` when the event scores above the threshold and
 `None` otherwise. **Baselines are learned from the stream, so a cold detector
 scores nothing useful** — it needs history before its output means anything, which
 is why the snippet below replays the training window first.
+
+**The stream contract, stated because nothing enforces it yet.** One detector
+instance is a single-writer state machine over one totally ordered, at-most-once
+stream: events arrive in timestamp order with unique ids, and an instance is never
+shared across threads. Out-of-order or duplicate delivery corrupts the window
+silently in both engines, and concurrent callers crash or corrupt state; sharding
+by merchant or BIN, ordering within a shard, and de-duplication are the caller's
+responsibility. Each `Event` validates its own fields on construction (status,
+types, non-negative amount), so both engines now see the same input contract; the
+ordering and idempotency checks are the next build, named in the external audit.
+The triage graph and the explainer run on the Python reference; the Rust core
+returns scores and is the engine for `make eval ENGINE=rust`.
 
 ![One flag with all six score contributions: decline_bin +18.03, amount +6.25, the other four terms zero, summing to the score 24.28 against threshold 21.99](docs/img/flag_card.png)
 
@@ -558,7 +573,7 @@ python/spandan/detect/  Detector interface, Python reference (the spec), Rust ad
 python/spandan/eval/  Temporal loader, metrics, rupee cost model, evaluation harness, learned baselines, benchmarks
 python/spandan/triage/  The post-detection graph: nodes, routing table, audit trail, kill-switch
 python/spandan/llm/   Bounded explanation layer, grounding validator, cassettes, comparison target
-tests/                130 tests: generator, detector, cross-engine parity, evaluation, triage graph, LLM boundary
+tests/                135 tests: generator, detector, cross-engine parity, evaluation, triage graph, LLM boundary
 docs/                 ARCHITECTURE, FAILURE_MODES, BENCH, BUILD_LOG, PHASES, AUDIT, agents (house rules)
 scripts/              check_figures.py - every documented figure against the build (make check)
                       render_demo.py - the README recording and stills, from captured transcripts

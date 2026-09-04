@@ -8,7 +8,7 @@ completion with identical output while `spandan.llm` raises on the very
 attempt to import it. That is the claim a review panel cares about; everything
 else in this file is secondary.
 
-A conftest fixture blocks socket creation for every test in this module, so
+An autouse fixture in this module blocks socket creation for every test, so
 "replay mode never touches the network" is enforced at the OS boundary, not
 trusted from a docstring.
 """

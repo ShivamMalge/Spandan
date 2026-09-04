@@ -402,3 +402,34 @@ def test_no_episode_straddles_the_split_boundary():
     for spec in DEFAULT_CONFIG.episodes:
         end_day = spec.day + spec.duration_minutes / 1440.0
         assert not (spec.day < boundary < end_day), f"{spec.scenario_id} at day {spec.day}"
+
+
+def test_event_rejects_unknown_status_and_wrong_types():
+    """The input contract lives on Event, so both engines see the same events.
+
+    Before this, the Python reference counted any status that was not "declined"
+    as approved while the Rust core raised; a real "failed" would have zeroed the
+    primary signal on one engine and crashed the other (external audit, B4).
+    """
+    import pytest
+
+    from spandan.gen.schema import STATUS_DECLINED, Event
+
+    good = dict(
+        ts=1_700_000_000_000, txn_id="txn_1", merchant_id="mer_001", bin="099813",
+        card_ref="card_0000000001", ip="192.0.2.1", device_id="dev_0000000001",
+        amount_paise=545, status=STATUS_DECLINED, label=0, scenario_id="benign",
+    )
+    Event(**good)
+    with pytest.raises(ValueError, match="unknown status"):
+        Event(**{**good, "status": "captured"})
+    with pytest.raises(ValueError, match="unknown status"):
+        Event(**{**good, "status": "failed"})
+    with pytest.raises(TypeError, match="bin must be a non-empty str"):
+        Event(**{**good, "bin": 99813})
+    with pytest.raises(TypeError, match="card_ref must be a non-empty str"):
+        Event(**{**good, "card_ref": None})
+    with pytest.raises(ValueError, match="amount_paise"):
+        Event(**{**good, "amount_paise": -1})
+    with pytest.raises(TypeError, match="ts must be an int"):
+        Event(**{**good, "ts": 1.5})

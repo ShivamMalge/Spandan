@@ -13,6 +13,7 @@ float formatting is not something to have to trust.
 
 from __future__ import annotations
 
+import numbers
 from dataclasses import dataclass, fields
 
 # --- status ---------------------------------------------------------------
@@ -100,6 +101,30 @@ class Event:
 
     scenario_id: str
     """Which generator population produced this event. Evaluation only."""
+
+    def __post_init__(self) -> None:
+        # The input contract, enforced once at the boundary so both engines see
+        # the same events. Before this the Python reference counted any status
+        # that was not "declined" as approved - a real "failed" would have
+        # zeroed the primary signal - while the Rust core raised on it
+        # (external audit, 2026-09-03, B4). Cheap checks only: this runs on
+        # every one of 1.6M events at load.
+        if self.status not in STATUSES:
+            raise ValueError(f"unknown status {self.status!r}; expected one of {STATUSES}")
+        # txn_id is type-checked only: the generator builds events with an empty
+        # id and assigns ids after the total-order sort (build.generate_events).
+        if not isinstance(self.txn_id, str):
+            raise TypeError(f"txn_id must be a str, got {self.txn_id!r}")
+        for name in ("merchant_id", "bin", "card_ref", "ip", "device_id"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not value:
+                raise TypeError(f"{name} must be a non-empty str, got {value!r}")
+        # numbers.Integral, not int: the generator hands over numpy integers.
+        if not isinstance(self.ts, numbers.Integral) or isinstance(self.ts, bool):
+            raise TypeError(f"ts must be an int of epoch milliseconds, got {self.ts!r}")
+        if (not isinstance(self.amount_paise, numbers.Integral) or isinstance(self.amount_paise, bool)
+                or self.amount_paise < 0):
+            raise ValueError(f"amount_paise must be a non-negative int, got {self.amount_paise!r}")
 
 
 #: What a detector is allowed to see.

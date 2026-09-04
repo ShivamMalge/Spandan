@@ -647,6 +647,46 @@ baseline comparison. A technical panel will still ask for the baseline, and
 published criteria gets more from a measured kill-switch than from a logistic
 regression. If both fit, do both. If one must go, C goes.
 
+## Phase I — The external audit's findings, and what was done with each (Sep 3–4)
+
+An adversarial end-to-end audit of commit c327dd9 (`docs/EXTERNAL_AUDIT_2026-09-03.pdf`)
+confirmed twenty defects by execution and scored the submission 56/100 with a
+potential of 80 after its P0 and P1 lists. Its verdict: shortlist yes, winner as it
+stands no. Every confirmed finding, with what was done:
+
+| # | finding | disposition |
+|---|---|---|
+| B1 | `reset()` leaves `_last_global_ms` behind; a reused Python instance diverges from Rust on the drop-EWMA path | **decision pending**: three lines in the frozen `reference.py`, no scoring arithmetic touched, no figure moves; the freeze is the owner's rule |
+| B2 | out-of-order timestamps corrupt the window silently in both engines | **stated as a precondition** in README, ARCHITECTURE and FAILURE_MODES §5; enforcement in both engines is the next build (touches frozen code) |
+| B3 | duplicate `txn_id` counted twice | as B2: stated, not enforced; belongs in the ingestion adapter |
+| B4 | the Python reference counted any unknown status as approved; Rust raised | **fixed**: `Event.__post_init__` validates status, id types and amount at the boundary, so both engines see one contract; tested |
+| B5 | the Rust engine returns a score, not a `Flag`, so triage and explain are Python-only | **stated** in the README; the Rust `Flag` is P1, after submission |
+| B6 | `spandan explain` default path dead (cassettes keyed to Gemini, default Groq) | **fixed** before the audit was read: provider moved to the Anthropic API, six cassettes recorded, `explain` shows the accepted note on one flag and the validator rejection with exit 4 on the other |
+| B7 | the validator is a regex deny-list that rephrasing defeats; README overclaimed | **README claim already gone**; §8 states the mention-based limits and the prompt/validator inconsistency the recordings exposed; structured output is P2 |
+| B8 | `replay` without `metrics.json` used the placeholder threshold 3.0 | **fixed**: refuses with exit 2 and says to run `make eval` or pass `--threshold`; tested |
+| B9 | neither engine is safe under concurrent callers | **stated** (single-writer) with B2; a lock or sharding is the caller's, documented |
+| B10 | velocity evidence capped at the ring size in the hottest bursts | **left**: documented behaviour (`window_saturated`), detection still occurs via decline ratio; a separate counter touches frozen state |
+| B11 | every command re-warms 804k events; no warm-state snapshot | **left for after submission**; the demo is pre-generated and the README says the warm-up is by design |
+| B12 | one test was 91% of the suite runtime | **fixed**: `run_seed_matrix` takes the generator config; the shape test runs on the small stream |
+| B13 | boosted-model drift misattributed to the C runtime; scikit-learn unpinned | **fixed** before the audit was read (entry 15, pin) |
+| B14 | stale docstrings; Phase D status ahead of the code | **fixed**: docstrings corrected; Phase D measured and closed |
+| B15 | harness reconfigures stdout at import; mutable engine global | **left**: harness-internal, no figure depends on it |
+| B16 | `cli.replay` duplicates cost arithmetic | **left**: P2 |
+| B17 | detector defaults in three places, no agreement test | **left**: P2; the Rust defaults are exercised by the parity fixture |
+| B18 | `act` is a no-op; interrupt has no resume; audit file truncated per run | **left, and the README already says the action is a no-op**; a real action and a resume path need a serving surface |
+| B19 | Rust hot-path allocations | **left**: documented in FAILURE_MODES §7 item 5 as constant-factor |
+| B20 | `label` and `scenario_id` required on `Event` | **left**: the adapter that constructs events from real traffic supplies label 0 and scenario "live"; that adapter is P1 |
+
+The audit's competitive gaps, in the order it ranked them: a Razorpay webhook
+adapter with status mapping and `error_source`; the `error_source` experiment
+against the outage failure; a generated static report from `make eval`; a
+graduated-response node; idempotency and ordering enforcement; bounded memory
+and persisted state. The first three are the next builds after submission, in
+that order; a static report is the surface this project should have, and a live
+dashboard is not, until persistence and the ingestion contract exist. Its top
+demo-day risks — the dead `explain` path and the placeholder threshold — are the
+two fixes above.
+
 ## Schedule
 
 | When | Phase | Hours | Risk | Score after |

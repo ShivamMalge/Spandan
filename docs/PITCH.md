@@ -98,7 +98,7 @@ outage is a feature problem, not a weight problem. Both are in the repo."
 
 ## 4:45 — Close (15 s)
 
-130 Python and 33 Rust tests, a figure checker over four hundred documented numbers,
+135 Python and 33 Rust tests, a figure checker over four hundred documented numbers,
 three CI jobs that regenerate the stream and the evaluation from nothing on a
 machine that is not mine, and a build log with fifteen entries each written
 with the wrong diagnosis before the right one.
